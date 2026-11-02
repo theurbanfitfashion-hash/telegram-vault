@@ -1,0 +1,48 @@
+name: Deploy Convex backend
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/convex/**"
+      - "convex.json"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/deploy-convex.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Deploy backend and generate client types
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+        run: |
+          if [ -z "$CONVEX_DEPLOY_KEY" ]; then
+            echo "::error::Add CONVEX_DEPLOY_KEY in GitHub repository Actions secrets."
+            exit 1
+          fi
+          npx convex deploy --yes
+          npx convex codegen
+      - name: Commit generated Convex types
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f src/convex/_generated
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update generated Convex types [skip ci]"
+            git push origin HEAD:main
+          fi
