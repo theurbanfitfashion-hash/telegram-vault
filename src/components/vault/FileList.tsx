@@ -267,7 +267,7 @@ export function FileList({
         <div className="px-6 py-14 text-center text-sm text-muted-foreground">No matching files or folders.</div>
       ) : null}
       <div className={cn(viewMode === "grid" ? "grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" : "divide-y divide-border/60")}>
-      <div className={cn("items-center gap-3 bg-muted/50 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground sm:flex", viewMode === "grid" && "hidden")}>
+      <div className={viewMode === "grid" ? "hidden" : "flex items-center gap-3 bg-muted/50 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground"}>
         <span className="flex-1">Name</span>
         <span className="w-24 shrink-0 text-right">Size</span>
         <span className="hidden w-32 shrink-0 text-right md:block">Modified</span>
