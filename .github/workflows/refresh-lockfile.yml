@@ -8,6 +8,10 @@ on:
       - package.json
       - .github/workflows/refresh-lockfile.yml
 
+concurrency:
+  group: telegram-vault-main-maintenance
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -29,6 +33,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git rebase origin/main
           git add package-lock.json
           if ! git diff --cached --quiet; then
             git commit -m "chore: sync package-lock.json with package.json"
