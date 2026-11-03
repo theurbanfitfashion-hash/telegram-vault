@@ -35,10 +35,20 @@ interface TelegramChat {
   title?: string;
 }
 
+interface TelegramFileHandle {
+  file_id?: string;
+}
+
 interface TelegramMessage {
   message_id: number;
   chat: TelegramChat;
-  document?: { file_id?: string };
+  document?: TelegramFileHandle;
+  audio?: TelegramFileHandle;
+  video?: TelegramFileHandle;
+  animation?: TelegramFileHandle;
+  voice?: TelegramFileHandle;
+  video_note?: TelegramFileHandle;
+  photo?: TelegramFileHandle[];
 }
 
 interface TelegramUpdate {
@@ -370,9 +380,24 @@ export const sendChunk = action({
       const message = await telegram<TelegramMessage>("sendDocument", token, {
         form,
       });
-      const telegramFileId = message.document?.file_id;
+      // Telegram may classify a media upload under its native Message field
+      // (audio/video/animation/etc.) rather than document. Any of these
+      // file_id values can be passed to getFile for downloading later.
+      const telegramFileId =
+        message.document?.file_id ??
+        message.audio?.file_id ??
+        message.video?.file_id ??
+        message.animation?.file_id ??
+        message.voice?.file_id ??
+        message.video_note?.file_id ??
+        message.photo?.at(-1)?.file_id;
       if (!telegramFileId) {
-        throw new ConvexError("Telegram accepted the part but gave back no file handle.");
+        const returnedFields = Object.keys(message).filter(
+          (key) => !["chat", "from", "sender_chat"].includes(key),
+        );
+        throw new ConvexError(
+          `Telegram returned a message without a file handle (fields: ${returnedFields.join(", ") || "none"}).`,
+        );
       }
 
       stage = "saving the Telegram file reference";
