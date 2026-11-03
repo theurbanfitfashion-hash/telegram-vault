@@ -40,6 +40,7 @@ export default function Music() {
   const [source, setSource] = useState<string | null>(null);
   const [loadingSource, setLoadingSource] = useState(false);
   const [playing, setPlaying] = useState(false);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.85);
@@ -59,7 +60,10 @@ export default function Music() {
     if (!activeTrack) { setSource(null); return; }
     setLoadingSource(true);
     setSource(null);
+    setPlaying(false);
+    setPlaybackError(null);
     setCurrentTime(0);
+    setDuration(0);
     createToken({ fileId: activeTrack._id })
       .then((token) => {
         const site = convexSiteUrl();
@@ -83,14 +87,9 @@ export default function Music() {
 
   const playTrack = useCallback(async (id: Id<"files">) => {
     setActiveId(id);
-    setPlaying(true);
+    setPlaying(false);
+    setPlaybackError(null);
   }, []);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || !source || !playing) return;
-    void audio.play().catch(() => setPlaying(false));
-  }, [source, playing]);
 
   const next = useCallback(() => {
     if (!tracks.length) return;
@@ -102,7 +101,7 @@ export default function Music() {
     } else if (index < tracks.length - 1) setActiveId(tracks[index + 1]._id);
     else if (repeat === "all") setActiveId(tracks[0]._id);
     else setPlaying(false);
-    setPlaying(true);
+    setPlaying(false);
   }, [tracks, activeTrack?._id, shuffle, repeat]);
 
   const previous = useCallback(() => {
@@ -111,13 +110,13 @@ export default function Music() {
     const index = tracks.findIndex((track) => track._id === activeTrack?._id);
     if (index > 0) setActiveId(tracks[index - 1]._id);
     else if (repeat === "all" && tracks.length) setActiveId(tracks[tracks.length - 1]._id);
-    setPlaying(true);
+    setPlaying(false);
   }, [tracks, activeTrack?._id, repeat]);
 
   const togglePlay = () => {
     const audio = audioRef.current;
-    if (!audio || !source) { setPlaying(true); return; }
-    if (audio.paused) void audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+    if (!audio || !source) return;
+    if (audio.paused) void audio.play().then(() => { setPlaybackError(null); setPlaying(true); }).catch((error: unknown) => { console.error("Audio playback failed", error); setPlaybackError("Playback was blocked or the audio format is unsupported. Tap Play again, or try downloading the file."); setPlaying(false); });
     else { audio.pause(); setPlaying(false); }
   };
 
@@ -161,7 +160,7 @@ export default function Music() {
               <div className="mt-5 flex items-center justify-center gap-5">
                 <button aria-label="Shuffle" onClick={() => setShuffle(!shuffle)} className={`rounded-full p-2 ${shuffle ? "text-cyan-300" : "text-white/45 hover:text-white"}`}><Shuffle className="size-4" /></button>
                 <button aria-label="Previous track" onClick={previous} className="rounded-full p-2 text-white/80 hover:text-cyan-200"><SkipBack className="size-6" fill="currentColor" /></button>
-                <button aria-label={playing ? "Pause" : "Play"} onClick={togglePlay} disabled={!activeTrack} className="grid size-16 place-items-center rounded-full bg-cyan-300 text-[#07121c] transition-transform hover:scale-105 disabled:opacity-40">{playing ? <Pause className="size-6" fill="currentColor" /> : <Play className="ml-1 size-6" fill="currentColor" />}</button>
+                <button aria-label={playing ? "Pause" : "Play"} onClick={togglePlay} disabled={!activeTrack || loadingSource || !source} className="grid size-16 place-items-center rounded-full bg-cyan-300 text-[#07121c] transition-transform hover:scale-105 disabled:opacity-40">{playing ? <Pause className="size-6" fill="currentColor" /> : <Play className="ml-1 size-6" fill="currentColor" />}</button>
                 <button aria-label="Next track" onClick={next} className="rounded-full p-2 text-white/80 hover:text-cyan-200"><SkipForward className="size-6" fill="currentColor" /></button>
                 <button aria-label="Repeat mode" onClick={() => setRepeat((value) => value === "off" ? "all" : value === "all" ? "one" : "off")} className={`rounded-full p-2 ${repeat !== "off" ? "text-cyan-300" : "text-white/45 hover:text-white"}`}>{repeat === "one" ? <Repeat1 className="size-4" /> : <Repeat className="size-4" />}</button>
               </div>
@@ -170,8 +169,8 @@ export default function Music() {
                 <input aria-label="Volume" type="range" min={0} max={1} step={0.01} value={muted ? 0 : volume} onChange={(event) => { setVolume(Number(event.target.value)); setMuted(false); }} className="w-28 cursor-pointer accent-cyan-300" />
               </div>
             </div>
-            {loadingSource ? <p className="mt-4 text-center text-xs text-white/40">Preparing audio stream…</p> : null}
-            <audio ref={audioRef} src={source ?? undefined} preload="metadata" onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)} onEnded={() => { if (repeat === "one" && audioRef.current) { audioRef.current.currentTime = 0; void audioRef.current.play(); } else next(); }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => { if (source) setPlaying(false); }} />
+            {loadingSource ? <p className="mt-4 text-center text-xs text-white/40">Preparing audio stream…</p> : playbackError ? <p role="alert" className="mt-4 text-center text-xs text-rose-300">{playbackError}</p> : activeTrack && !source ? <p className="mt-4 text-center text-xs text-white/40">Audio link is not ready yet.</p> : null}
+            <audio ref={audioRef} src={source ?? undefined} preload="metadata" onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)} onEnded={() => { if (repeat === "one" && audioRef.current) { audioRef.current.currentTime = 0; void audioRef.current.play(); } else next(); }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => { if (source) { setPlaying(false); setPlaybackError("The audio stream could not be loaded. Check the file format or try downloading it."); } }} />
           </div>
 
           <aside className="mx-auto w-full max-w-xl overflow-hidden rounded-3xl border border-white/10 bg-white/[0.035]">
