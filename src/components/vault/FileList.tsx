@@ -3,6 +3,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -12,6 +13,9 @@ import { formatBytes, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMemo, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
+  Check,
   Download,
   Eye,
   File as FileIcon,
@@ -34,6 +38,11 @@ import {
 
 /** A file as the list sees it — its Telegram parts never leave the server. */
 export type ListedFile = Omit<Doc<"files">, "parts">;
+
+function fileExtension(name: string) {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toLowerCase() : "";
+}
 
 function iconForFile(name: string) {
   const extension = name.split(".").pop()?.toLowerCase() ?? "";
@@ -93,24 +102,40 @@ export function FileList({
   onDeleteFile: (file: ListedFile) => void;
 }) {
   const [search, setSearch] = useState("");
-  const [sort, setSort] = useState<"name-asc" | "name-desc" | "newest" | "oldest" | "largest" | "smallest">("newest");
+  const [sortField, setSortField] = useState<"date" | "size" | "name" | "type">("date");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const sortLabel = {
+    date: "Date modified",
+    size: "Size",
+    name: "Filename",
+    type: "Type",
+  }[sortField];
+
   const visibleFolders = useMemo(() => folders
     .filter((folder) => folder.name.toLowerCase().includes(search.trim().toLowerCase()))
     .slice()
-    .sort((a, b) => sort === "name-desc" ? b.name.localeCompare(a.name) :
-      sort === "oldest" ? a.createdAt - b.createdAt : sort === "newest" ? b.createdAt - a.createdAt :
-      a.name.localeCompare(b.name)), [folders, search, sort]);
+    .sort((a, b) => {
+      const result = sortField === "date"
+        ? a.createdAt - b.createdAt
+        : a.name.localeCompare(b.name);
+      return sortDirection === "asc" ? result : -result;
+    }), [folders, search, sortField, sortDirection]);
+
   const visibleFiles = useMemo(() => files
     .filter((file) => file.name.toLowerCase().includes(search.trim().toLowerCase()))
     .slice()
     .sort((a, b) => {
-      if (sort === "name-asc") return a.name.localeCompare(b.name);
-      if (sort === "name-desc") return b.name.localeCompare(a.name);
-      if (sort === "oldest") return a.createdAt - b.createdAt;
-      if (sort === "largest") return b.size - a.size;
-      if (sort === "smallest") return a.size - b.size;
-      return b.createdAt - a.createdAt;
-    }), [files, search, sort]);
+      let result = 0;
+      if (sortField === "date") result = a.createdAt - b.createdAt;
+      else if (sortField === "size") result = a.size - b.size;
+      else if (sortField === "name") result = a.name.localeCompare(b.name);
+      else {
+        const typeA = fileExtension(a.name);
+        const typeB = fileExtension(b.name);
+        result = typeA.localeCompare(typeB) || a.name.localeCompare(b.name);
+      }
+      return sortDirection === "asc" ? result : -result;
+    }), [files, search, sortField, sortDirection]);
 
   if (folders.length === 0 && files.length === 0) {
     return (
@@ -154,19 +179,46 @@ export function FileList({
             className="h-10 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-base outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
           />
         </label>
-        <select
-          value={sort}
-          onChange={(event) => setSort(event.target.value as typeof sort)}
-          aria-label="Sort files"
-          className="h-10 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <option value="newest">Newest first</option>
-          <option value="oldest">Oldest first</option>
-          <option value="name-asc">Name A–Z</option>
-          <option value="name-desc">Name Z–A</option>
-          <option value="largest">Largest first</option>
-          <option value="smallest">Smallest first</option>
-        </select>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-label={`Sort by ${sortLabel}, ${sortDirection === "asc" ? "ascending" : "descending"}`}
+              className="h-10 shrink-0 justify-between gap-3 px-3"
+            >
+              <span>{sortLabel}</span>
+              {sortDirection === "asc" ? <ArrowUp className="size-4" /> : <ArrowDown className="size-4" />}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+            {([
+              ["date", "Date modified"],
+              ["size", "Size"],
+              ["name", "Filename"],
+              ["type", "Type"],
+            ] as const).map(([field, label]) => (
+              <DropdownMenuItem key={field} onClick={() => setSortField(field)}>
+                <span className="flex-1">{label}</span>
+                {sortField === field ? <Check className="size-4 text-primary" /> : null}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Order</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => setSortDirection("asc")}>
+              <ArrowUp className="mr-2 size-4" />
+              <span className="flex-1">Ascending</span>
+              {sortDirection === "asc" ? <Check className="size-4 text-primary" /> : null}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setSortDirection("desc")}>
+              <ArrowDown className="mr-2 size-4" />
+              <span className="flex-1">Descending</span>
+              {sortDirection === "desc" ? <Check className="size-4 text-primary" /> : null}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       {visibleFolders.length === 0 && visibleFiles.length === 0 ? (
         <div className="px-6 py-14 text-center text-sm text-muted-foreground">No matching files or folders.</div>
