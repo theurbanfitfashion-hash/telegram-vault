@@ -89,7 +89,7 @@ createRoot(document.getElementById("root")!).render(
                 path="/music"
                 element={
                   <RequireAuth title="Sign in to listen to your music" description="Your personal music library is private to your vault.">
-                    <div className="min-h-dvh bg-[#090d13]" />
+                    {null}
                   </RequireAuth>
                 }
               />
