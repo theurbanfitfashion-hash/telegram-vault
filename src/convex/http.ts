@@ -76,11 +76,22 @@ function attachmentDisposition(fileName: string): string {
  */
 const telegramPathCache = new Map<string, { url: string; expiresAt: number }>();
 
+const telegramPartCache = new Map<string, { bytes: Uint8Array; expiresAt: number }>();
+const TELEGRAM_PART_CACHE_TTL_MS = 10 * 60 * 1000;
+const TELEGRAM_PART_CACHE_MAX_BYTES = 40 * 1024 * 1024;
+let telegramPartCacheBytes = 0;
+
 async function openPart(
   botToken: string,
   telegramFileId: string,
-): Promise<ReadableStream<Uint8Array>> {
+): Promise<Uint8Array> {
   const cacheKey = `${botToken}:${telegramFileId}`;
+  const cachedPart = telegramPartCache.get(cacheKey);
+  if (cachedPart && cachedPart.expiresAt > Date.now()) return cachedPart.bytes;
+  if (cachedPart) {
+    telegramPartCacheBytes -= cachedPart.bytes.byteLength;
+    telegramPartCache.delete(cacheKey);
+  }
   const cached = telegramPathCache.get(cacheKey);
   let fileUrl = cached && cached.expiresAt > Date.now() ? cached.url : null;
 
@@ -115,7 +126,19 @@ async function openPart(
   if (!upstream.ok || !upstream.body) {
     throw new Error(`Telegram file download failed (HTTP ${upstream.status}).`);
   }
-  return upstream.body;
+  const bytes = new Uint8Array(await new Response(upstream.body).arrayBuffer());
+  if (bytes.byteLength <= TELEGRAM_PART_CACHE_MAX_BYTES) {
+    while (telegramPartCacheBytes + bytes.byteLength > TELEGRAM_PART_CACHE_MAX_BYTES && telegramPartCache.size) {
+      const oldestKey = telegramPartCache.keys().next().value;
+      if (!oldestKey) break;
+      const oldest = telegramPartCache.get(oldestKey);
+      if (oldest) telegramPartCacheBytes -= oldest.bytes.byteLength;
+      telegramPartCache.delete(oldestKey);
+    }
+    telegramPartCache.set(cacheKey, { bytes, expiresAt: Date.now() + TELEGRAM_PART_CACHE_TTL_MS });
+    telegramPartCacheBytes += bytes.byteLength;
+  }
+  return bytes;
 }
 
 type ByteRange = { start: number; end: number };
@@ -153,51 +176,6 @@ function parseRangeHeader(
   return { start, end: Math.min(requestedEnd, size - 1) };
 }
 
-/** Keeps only `take` bytes of `source`, dropping `skip` bytes up front. */
-function takeBytes(
-  source: ReadableStream<Uint8Array>,
-  skip: number,
-  take: number,
-): ReadableStream<Uint8Array> {
-  const reader = source.getReader();
-  let skipped = 0;
-  let remaining = take;
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      for (;;) {
-        if (remaining <= 0) {
-          controller.close();
-          await reader.cancel().catch(() => {});
-          return;
-        }
-        const { value, done } = await reader.read();
-        if (done) {
-          controller.close();
-          return;
-        }
-        let chunk = value;
-        if (skipped < skip) {
-          const drop = Math.min(skip - skipped, chunk.byteLength);
-          skipped += drop;
-          chunk = chunk.subarray(drop);
-        }
-        if (chunk.byteLength === 0) continue;
-        if (chunk.byteLength > remaining) chunk = chunk.subarray(0, remaining);
-        remaining -= chunk.byteLength;
-        controller.enqueue(chunk);
-        if (remaining <= 0) {
-          controller.close();
-          await reader.cancel().catch(() => {});
-        }
-        return;
-      }
-    },
-    async cancel(reason) {
-      await reader.cancel(reason);
-    },
-  });
-}
-
 /**
  * Serves the requested byte window by walking only the parts it touches. The
  * next part's fetch starts while the current one streams, so playback never
@@ -210,9 +188,9 @@ function streamRange(
   start: number,
   end: number,
   size: number,
-  firstStream: ReadableStream<Uint8Array>,
+  firstStream: Uint8Array,
 ): ReadableStream<Uint8Array> {
-  const openers = new Map<number, Promise<ReadableStream<Uint8Array>>>();
+  const openers = new Map<number, Promise<Uint8Array>>();
   // Open the first Telegram part before sending HTTP headers. This lets the
   // route return a useful 502 response instead of a browser "Failed to fetch".
   const firstIndex = Math.min(Math.floor(start / chunkBytes), partIds.length - 1);
@@ -242,13 +220,9 @@ function streamRange(
           const take = Math.min(end, partEnd) - cursor + 1;
           if (index + 1 < partIds.length) void open(index + 1);
 
-          const slice = takeBytes(await open(index), cursor - partStart, take);
-          const reader = slice.getReader();
-          for (;;) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            controller.enqueue(value);
-          }
+          const bytes = await open(index);
+          const offset = cursor - partStart;
+          controller.enqueue(bytes.subarray(offset, offset + take));
           cursor += take;
         }
         controller.close();
@@ -326,7 +300,7 @@ const downloadWhole = httpAction(async (ctx, request) => {
       Math.floor(start / file.chunkBytes),
       file.partIds.length - 1,
     );
-    let firstStream: ReadableStream<Uint8Array>;
+    let firstStream: Uint8Array;
     try {
       firstStream = await openPart(file.botToken, file.partIds[firstIndex]);
     } catch (error) {
