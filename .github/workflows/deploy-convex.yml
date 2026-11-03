@@ -39,9 +39,34 @@ jobs:
             echo "::error::Add CONVEX_DEPLOY_KEY in GitHub repository Actions secrets."
             exit 1
           fi
-          npx @convex-dev/auth --skip-git-check --web-server-url https://telegram-vault-web.onrender.com
-          npx convex env set SITE_URL https://telegram-vault-web.onrender.com
+          # First initialize the deployment context; env commands need this.
           npx convex dev --once
+          npx convex env set SITE_URL=https://telegram-vault-web.onrender.com
+
+          # Keep existing signing keys stable; only create them if either is missing.
+          ENV_LIST="$(npx convex env list)"
+          if ! printf '%s\n' "$ENV_LIST" | grep -q 'JWT_PRIVATE_KEY' || ! printf '%s\n' "$ENV_LIST" | grep -q 'JWKS'; then
+            node --input-type=module <<'NODE'
+          import { generateKeyPairSync, createPublicKey } from "node:crypto";
+          import { spawnSync } from "node:child_process";
+
+          const { privateKey, publicKey } = generateKeyPairSync("rsa", {
+            modulusLength: 2048,
+            privateKeyEncoding: { type: "pkcs8", format: "pem" },
+            publicKeyEncoding: { type: "spki", format: "pem" },
+          });
+          const jwk = createPublicKey(publicKey).export({ format: "jwk" });
+          const jwks = JSON.stringify({ keys: [{ use: "sig", ...jwk }] });
+          const values = [
+            ["JWT_PRIVATE_KEY", privateKey.trimEnd().replace(/\n/g, " ")],
+            ["JWKS", jwks],
+          ];
+          for (const [name, value] of values) {
+            const result = spawnSync("npx", ["convex", "env", "set", `${name}=${value}`], { stdio: "inherit" });
+            if (result.status !== 0) process.exit(result.status ?? 1);
+          }
+          NODE
+          fi
           npx convex codegen
       - name: Commit generated Convex types
         run: |
