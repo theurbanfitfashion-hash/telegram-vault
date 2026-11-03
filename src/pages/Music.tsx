@@ -61,6 +61,8 @@ export default function Music() {
   const [selectedPlaylistId, setSelectedPlaylistId] = useState("all");
   const audioRef = useRef<HTMLAudioElement>(null);
   const autoplayAfterLoad = useRef(false);
+  const prefetchedTokens = useRef(new Map<Id<"files">, string>());
+  const warmedTracks = useRef(new Set<Id<"files">>());
   const visibleTracks = selectedPlaylistId === "all"
     ? tracks
     : tracks.filter((track) => playlists.find((list) => list.id === selectedPlaylistId)?.trackIds.includes(track._id));
@@ -103,8 +105,13 @@ export default function Music() {
     setPlaybackError(null);
     setCurrentTime(0);
     setDuration(0);
-    createToken({ fileId: activeTrack._id })
+    const cachedToken = prefetchedTokens.current.get(activeTrack._id);
+    const tokenPromise = cachedToken
+      ? Promise.resolve(cachedToken)
+      : createToken({ fileId: activeTrack._id });
+    tokenPromise
       .then((token) => {
+        prefetchedTokens.current.set(activeTrack._id, token);
         const site = convexSiteUrl();
         if (!site) throw new Error("The media endpoint is not configured.");
         if (!cancelled) setSource(`${site}/file/${token}`);
@@ -116,6 +123,57 @@ export default function Music() {
       .finally(() => { if (!cancelled) setLoadingSource(false); });
     return () => { cancelled = true; };
   }, [activeTrack?._id, createToken]);
+
+  // Prepare the next two tracks in the background. We create their short-lived
+  // access tokens and warm the first 256 KiB through the same range endpoint,
+  // so Telegram's file path and the browser connection are ready before skip.
+  // Shuffle uses a stable random order for this preload pass too.
+  useEffect(() => {
+    if (!activeTrack || !tracks.length) return;
+    let cancelled = false;
+    const queueIds = upNext.filter((id) => id !== activeTrack._id);
+    const pool = (visibleTracks.length ? visibleTracks : tracks)
+      .filter((track) => track._id !== activeTrack._id && !queueIds.includes(track._id));
+    if (shuffle) {
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+      }
+    } else {
+      const currentIndex = (visibleTracks.length ? visibleTracks : tracks)
+        .findIndex((track) => track._id === activeTrack._id);
+      const ordered = (visibleTracks.length ? visibleTracks : tracks)
+        .slice(currentIndex + 1)
+        .filter((track) => !queueIds.includes(track._id));
+      pool.splice(0, pool.length, ...ordered);
+    }
+    const nextIds = [...queueIds, ...pool.map((track) => track._id)].slice(0, 2);
+    const site = convexSiteUrl();
+    if (!site) return;
+    void (async () => {
+      for (const id of nextIds) {
+        if (cancelled) return;
+        try {
+          let token = prefetchedTokens.current.get(id);
+          if (!token) {
+            token = await createToken({ fileId: id });
+            if (cancelled) return;
+            prefetchedTokens.current.set(id, token);
+          }
+          if (warmedTracks.current.has(id)) continue;
+          const response = await fetch(`${site}/file/${token}`, {
+            headers: { Range: "bytes=0-262143" },
+          });
+          if (!response.ok && response.status !== 206) continue;
+          await response.arrayBuffer();
+          warmedTracks.current.add(id);
+        } catch (error) {
+          console.debug("Next-track preloading skipped", error);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeTrack?._id, tracks, visibleTracks, upNext, shuffle, createToken]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -171,7 +229,7 @@ export default function Music() {
     else { audio.pause(); setPlaying(false); }
   };
 
-  const audioElement = <audio className="hidden" ref={audioRef} src={source ?? undefined} preload="none" onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)} onCanPlay={() => { if (autoplayAfterLoad.current && audioRef.current) { autoplayAfterLoad.current = false; void audioRef.current.play().then(() => { setPlaybackError(null); setPlaying(true); }).catch((error: unknown) => { console.error("Automatic playback failed", error); setPlaybackError("Tap Play to start this track. Your browser blocked automatic playback."); setPlaying(false); }); } }} onEnded={() => { if (repeat === "one" && audioRef.current) { audioRef.current.currentTime = 0; void audioRef.current.play(); } else next(); }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => { if (source) { setPlaying(false); setPlaybackError("The audio stream could not be loaded. Check the file format or try downloading it."); } }} />;
+  const audioElement = <audio className="hidden" ref={audioRef} src={source ?? undefined} preload="metadata" onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)} onCanPlay={() => { if (autoplayAfterLoad.current && audioRef.current) { autoplayAfterLoad.current = false; void audioRef.current.play().then(() => { setPlaybackError(null); setPlaying(true); }).catch((error: unknown) => { console.error("Automatic playback failed", error); setPlaybackError("Tap Play to start this track. Your browser blocked automatic playback."); setPlaying(false); }); } }} onEnded={() => { if (repeat === "one" && audioRef.current) { audioRef.current.currentTime = 0; void audioRef.current.play(); } else next(); }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => { if (source) { setPlaying(false); setPlaybackError("The audio stream could not be loaded. Check the file format or try downloading it."); } }} />;
 
   if (!isAuthenticated || !isPlayerPage) return null;
 
