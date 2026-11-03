@@ -235,15 +235,19 @@ export default function Music() {
                 <AnimatePresence initial={false}>
                   {visibleTracks.map((track, index) => {
                     const selected = track._id === activeTrack?._id;
-                    return <motion.button key={track._id} layout initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} onClick={() => void playTrack(track._id)} className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors ${selected ? "bg-cyan-300/10" : "hover:bg-white/[0.06]"}`}>
+                    return <motion.div key={track._id} role="button" tabIndex={0} layout initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} onClick={() => void playTrack(track._id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void playTrack(track._id); } }} className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors ${selected ? "bg-cyan-300/10" : "hover:bg-white/[0.06]"}`}>
                       <span className={`grid size-10 shrink-0 place-items-center rounded-xl ${selected ? "bg-cyan-300 text-slate-950" : "bg-white/[0.07] text-white/55"}`}>{selected && playing ? <AudioLines className="size-4" /> : <span className="font-mono text-xs">{String(index + 1).padStart(2, "0")}</span>}</span>
                       <span className="min-w-0 flex-1"><span className={`block truncate text-sm font-medium ${selected ? "text-cyan-200" : "text-white/85"}`}>{titleOf(track.name)}</span><span className="mt-1 block text-xs text-white/40">{formatBytes(track.size)}</span></span>
                       <span className="flex shrink-0 items-center gap-1">
                         <button type="button" title="Play this next" aria-label={`Play ${titleOf(track.name)} next`} onClick={(event) => { event.stopPropagation(); playNext(track._id); }} className="rounded-md p-1.5 text-white/35 hover:bg-white/10 hover:text-cyan-200"><SkipForward className="size-4" /></button>
-                        {playlists.length > 0 && <button type="button" title="Add to playlist" aria-label={`Add ${titleOf(track.name)} to playlist`} onClick={(event) => { event.stopPropagation(); const target = selectedPlaylistId === "all" ? playlists[0] : playlists.find((list) => list.id === selectedPlaylistId); if (target) addToPlaylist(target.id, track._id); }} className="rounded-md p-1.5 text-white/35 hover:bg-white/10 hover:text-cyan-200"><ListPlus className="size-4" /></button>}
+                        {playlists.length > 0 && <button type="button" title="Add to playlist" aria-label={`Add ${titleOf(track.name)} to playlist`} onClick={(event) => { event.stopPropagation(); const target = selectedPlaylistId === "all" ? playlists[0] : playlists.find((list) => list.id === selectedPlaylistId); if (playlists.length) {
+                          const chosen = window.prompt(`Add to which playlist? Enter a name:\\n${playlists.map((list) => list.name).join("\\n")}`);
+                          const destination = playlists.find((list) => list.name.toLowerCase() === chosen?.trim().toLowerCase());
+                          if (destination) addToPlaylist(destination.id, track._id);
+                        } }} className="rounded-md p-1.5 text-white/35 hover:bg-white/10 hover:text-cyan-200"><ListPlus className="size-4" /></button>}
                         {selected ? <Pause className="size-4 text-cyan-300" /> : <Play className="size-4 text-white/35" />}
                       </span>
-                    </motion.button>;
+                    </motion.div>;
                   })}
                 </AnimatePresence>
               </div>
