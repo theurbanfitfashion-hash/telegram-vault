@@ -12,7 +12,6 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { useAuth } from "@/hooks/use-auth";
-import { PlayerArtwork } from "@/components/vault/PlayerArtwork";
 
 type SavedPlaylist = { id: string; name: string; trackIds: string[] };
 
@@ -40,8 +39,7 @@ export default function Music() {
   const location = useLocation();
   const { isAuthenticated } = useAuth();
   const isPlayerPage = location.pathname === "/music";
-  const isDashboard = location.pathname === "/dashboard";
-  const files = useQuery(api.vault.listAllFiles, isAuthenticated && (isPlayerPage || isDashboard) ? {} : "skip");
+  const files = useQuery(api.vault.listAllFiles, isAuthenticated && isPlayerPage ? {} : "skip");
   const createToken = useMutation(api.vault.createDownloadToken);
   const tracks = useMemo(() => (files ?? []).filter((file) => file.status === "ready" && isAudio(file)), [files]);
   const [activeId, setActiveId] = useState<Id<"files"> | null>(null);
@@ -175,46 +173,14 @@ export default function Music() {
 
   const audioElement = <audio className="hidden" ref={audioRef} src={source ?? undefined} preload="none" onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)} onCanPlay={() => { if (autoplayAfterLoad.current && audioRef.current) { autoplayAfterLoad.current = false; void audioRef.current.play().then(() => { setPlaybackError(null); setPlaying(true); }).catch((error: unknown) => { console.error("Automatic playback failed", error); setPlaybackError("Tap Play to start this track. Your browser blocked automatic playback."); setPlaying(false); }); } }} onEnded={() => { if (repeat === "one" && audioRef.current) { audioRef.current.currentTime = 0; void audioRef.current.play(); } else next(); }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => { if (source) { setPlaying(false); setPlaybackError("The audio stream could not be loaded. Check the file format or try downloading it."); } }} />;
 
-  if (!isAuthenticated || (!isPlayerPage && !isDashboard)) return null;
-
-  if (isDashboard) {
-    return (
-      <>
-      {audioElement}
-      <div className="fixed inset-x-3 bottom-3 z-50 flex justify-end sm:inset-x-6 sm:bottom-5 lg:left-[280px] lg:right-6">
-        <div className="relative ml-auto w-full max-w-[760px] overflow-hidden rounded-2xl border border-border/70 bg-background/80 shadow-[0_12px_48px_rgba(0,0,0,.22)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/65">
-          <div className="flex min-h-[76px] items-center gap-3 px-3 py-2.5 sm:gap-4 sm:px-5">
-            <button type="button" onClick={() => navigate("/music")} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-              <span className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-xl border border-border/60 bg-muted shadow-sm sm:size-12">
-                {activeTrack ? <PlayerArtwork track={activeTrack} /> : <AudioLines className="size-5 text-muted-foreground" />}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold leading-5">{activeTrack ? titleOf(activeTrack.name) : "Vault Music"}</span>
-                <span className="mt-0.5 block truncate text-xs text-muted-foreground">{activeTrack ? (loadingSource ? "Preparing audio…" : playing ? "Now playing" : "Paused") : "Choose a song to start listening"}</span>
-              </span>
-            </button>
-            <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-              <span className="hidden min-w-[76px] text-right font-mono text-[11px] tabular-nums text-muted-foreground md:block">{clock(currentTime)} / {clock(duration)}</span>
-              <button type="button" aria-label="Previous track" disabled={!activeTrack} onClick={previous} className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-35"><SkipBack className="size-4" /></button>
-              <button type="button" aria-label={playing ? "Pause music" : "Play music"} disabled={!activeTrack || loadingSource || !source} onClick={togglePlay} className="grid size-10 place-items-center rounded-full bg-primary text-primary-foreground shadow-sm transition hover:scale-105 disabled:opacity-40">{playing ? <Pause className="size-4" fill="currentColor" /> : <Play className="ml-0.5 size-4" fill="currentColor" />}</button>
-              <button type="button" aria-label="Next track" disabled={!activeTrack} onClick={next} className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-35"><SkipForward className="size-4" /></button>
-            </div>
-          </div>
-          <div className="h-1 w-full bg-foreground/[0.07]">
-            <div className="h-full bg-primary transition-[width] duration-200" style={{ width: `${duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0}%` }} />
-          </div>
-        </div>
-      </div>
-      </>
-    );
-  }
+  if (!isAuthenticated || !isPlayerPage) return null;
 
   if (files === undefined) return <>{audioElement}<main className="grid min-h-dvh place-items-center bg-[#090d13] text-white"><Loader2 className="size-6 animate-spin text-cyan-300" /></main></>;
 
   return (
     <>
     {audioElement}
-    <main className="min-h-dvh overflow-hidden bg-[#090d13] text-white">
+    <main className="min-h-dvh bg-[#090d13] text-white">
       <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col px-4 pb-8 pt-5 sm:px-8">
         <header className="flex items-center justify-between">
           <Button variant="ghost" className="text-white/70 hover:bg-white/10 hover:text-white" onClick={() => navigate("/dashboard")}>
@@ -223,9 +189,9 @@ export default function Music() {
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200/80"><AudioLines className="size-4" /> Vault Music</div>
         </header>
 
-        <section className="grid flex-1 items-center gap-8 py-10 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,.85fr)]">
+        <section className="grid flex-1 items-start gap-6 py-6 sm:gap-8 sm:py-10 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,.85fr)]">
           <div className="mx-auto w-full max-w-xl">
-            <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="relative mx-auto mb-9 aspect-square w-full max-w-[390px] overflow-hidden rounded-[2rem] border border-white/10 bg-gradient-to-br from-[#17334a] via-[#132231] to-[#281b3b] p-7">
+            <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="relative mx-auto mb-9 aspect-square w-full max-w-[340px] overflow-hidden rounded-[2rem] border border-white/10 bg-gradient-to-br from-[#17334a] via-[#132231] to-[#281b3b] p-7">
               <div className="absolute inset-0 opacity-40" style={{ backgroundImage: "radial-gradient(circle at 25% 20%, #41d9d0 0, transparent 34%), radial-gradient(circle at 80% 80%, #a855f7 0, transparent 38%)" }} />
               <div className="relative flex h-full flex-col items-center justify-center">
                 <div className="relative grid size-[68%] place-items-center rounded-full border border-white/20 bg-[#0b111b]/80">
@@ -282,7 +248,7 @@ export default function Music() {
             {tracks.length === 0 ? (
               <div className="px-6 py-16 text-center"><Disc3 className="mx-auto size-9 text-white/25" /><p className="mt-4 font-medium">No music found yet</p><p className="mt-2 text-sm leading-6 text-white/45">Upload MP3, M4A, WAV, FLAC or OGG files anywhere in your Vault.</p><Button className="mt-5 bg-cyan-300 text-slate-950 hover:bg-cyan-200" onClick={() => navigate("/dashboard")}>Open Vault</Button></div>
             ) : (
-              <div className="max-h-[520px] overflow-y-auto p-2">
+              <div className="max-h-[55dvh] overflow-y-auto p-2">
                 <AnimatePresence initial={false}>
                   {visibleTracks.map((track, index) => {
                     const selected = track._id === activeTrack?._id;
