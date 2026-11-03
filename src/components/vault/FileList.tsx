@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { api } from "@/convex/_generated/api";
 import { convexSiteUrl } from "@/lib/convex-site";
 import { useMutation } from "convex/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -131,13 +131,25 @@ function FileThumbnail({ file, className }: { file: ListedFile; className?: stri
   const [src, setSrc] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const thumbnailRef = useRef<HTMLSpanElement>(null);
+  const [nearViewport, setNearViewport] = useState(false);
   const image = isImageFile(file);
   const video = isVideoFile(file);
   const audio = isAudioFile(file);
   const Icon = iconForFile(file.name);
 
   useEffect(() => {
-    if (file.status !== "ready" || (!image && !video && !audio)) return;
+    const node = thumbnailRef.current;
+    if (!node || typeof IntersectionObserver === "undefined") { setNearViewport(true); return; }
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) { setNearViewport(true); observer.disconnect(); }
+    }, { rootMargin: "240px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!nearViewport || file.status !== "ready" || (!image && !video && !audio)) return;
     let cancelled = false;
     let objectUrl: string | null = null;
     let videoElement: HTMLVideoElement | null = null;
@@ -152,7 +164,7 @@ function FileThumbnail({ file, className }: { file: ListedFile; className?: stri
 
         if (audio && fileExtension(file.name) === "mp3") {
           try {
-            const response = await fetch(url, { headers: { Range: "bytes=0-1048575" } });
+            const response = await fetch(url, { headers: { Range: "bytes=0-262143" } });
             if (!response.ok) return;
             const artwork = extractMp3Artwork(await response.arrayBuffer());
             if (artwork && !cancelled) {
@@ -212,10 +224,10 @@ function FileThumbnail({ file, className }: { file: ListedFile; className?: stri
       }
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [createDownloadToken, file._id, file.status, file.name, image, video, audio]);
+  }, [createDownloadToken, file._id, file.status, file.name, image, video, audio, nearViewport]);
 
   return (
-    <span className={cn("grid shrink-0 place-items-center overflow-hidden rounded-lg bg-muted text-muted-foreground", className)}>
+    <span ref={thumbnailRef} className={cn("grid shrink-0 place-items-center overflow-hidden rounded-lg bg-muted text-muted-foreground", className)}>
       {image && src && !failed ? (
         <img src={src} alt={file.name} loading="lazy" className="h-full w-full object-cover" onError={() => setFailed(true)} />
       ) : preview && !failed ? (
