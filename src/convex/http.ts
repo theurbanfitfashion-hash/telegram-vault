@@ -354,7 +354,7 @@ const downloadPart = httpAction(async (ctx, request) => {
     return textResponse(502, "Telegram could not serve this file.");
   }
 
-  return new Response(upstream, {
+  return new Response(upstream.buffer.slice(upstream.byteOffset, upstream.byteOffset + upstream.byteLength) as ArrayBuffer, {
     status: 200,
     headers: {
       ...CORS_HEADERS,
