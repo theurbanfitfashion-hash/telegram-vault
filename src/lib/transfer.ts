@@ -139,7 +139,6 @@ export function useTransfer() {
 
         const uploadUrl = await getChunkUploadUrl({ fileId, index });
         const storageId = await postSlice(uploadUrl, slice, (loaded) => {
-          inFlightProgress.set(index, Math.min(loaded, slice.size));
           onPatch({ phase: "uploading", chunkIndex: index }, workerIndex);
           inFlightProgress.set(workerIndex, Math.min(loaded, slice.size));
           reportProgress(workerIndex);
@@ -155,10 +154,8 @@ export function useTransfer() {
         reportProgress(workerIndex);
       };
 
-      let nextIndex = 0;
       const worker = async (workerIndex: number) => {
-        while (nextIndex < chunkCount) {
-          const index = nextIndex++;
+        for (let index = workerIndex; index < chunkCount; index += concurrency) {
           await uploadPart(index, workerIndex);
         }
       };
