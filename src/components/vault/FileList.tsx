@@ -10,6 +10,7 @@ import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { errorMessage } from "@/lib/errors";
 import { formatBytes, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useMemo, useState } from "react";
 import {
   Download,
   Eye,
@@ -26,6 +27,7 @@ import {
   Music,
   Pencil,
   Plus,
+  Search,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -90,6 +92,26 @@ export function FileList({
   onMoveFile: (file: ListedFile) => void;
   onDeleteFile: (file: ListedFile) => void;
 }) {
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<"name-asc" | "name-desc" | "newest" | "oldest" | "largest" | "smallest">("newest");
+  const visibleFolders = useMemo(() => folders
+    .filter((folder) => folder.name.toLowerCase().includes(search.trim().toLowerCase()))
+    .slice()
+    .sort((a, b) => sort === "name-desc" ? b.name.localeCompare(a.name) :
+      sort === "oldest" ? a.createdAt - b.createdAt : sort === "newest" ? b.createdAt - a.createdAt :
+      a.name.localeCompare(b.name)), [folders, search, sort]);
+  const visibleFiles = useMemo(() => files
+    .filter((file) => file.name.toLowerCase().includes(search.trim().toLowerCase()))
+    .slice()
+    .sort((a, b) => {
+      if (sort === "name-asc") return a.name.localeCompare(b.name);
+      if (sort === "name-desc") return b.name.localeCompare(a.name);
+      if (sort === "oldest") return a.createdAt - b.createdAt;
+      if (sort === "largest") return b.size - a.size;
+      if (sort === "smallest") return a.size - b.size;
+      return b.createdAt - a.createdAt;
+    }), [files, search, sort]);
+
   if (folders.length === 0 && files.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 px-6 py-20 text-center">
@@ -121,6 +143,34 @@ export function FileList({
 
   return (
     <div className="divide-y divide-border/60">
+      <div className="flex flex-col gap-2 border-b border-border/60 p-3 sm:flex-row">
+        <label className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search files and folders"
+            aria-label="Search files and folders"
+            className="h-10 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-base outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
+          />
+        </label>
+        <select
+          value={sort}
+          onChange={(event) => setSort(event.target.value as typeof sort)}
+          aria-label="Sort files"
+          className="h-10 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="name-asc">Name A–Z</option>
+          <option value="name-desc">Name Z–A</option>
+          <option value="largest">Largest first</option>
+          <option value="smallest">Smallest first</option>
+        </select>
+      </div>
+      {visibleFolders.length === 0 && visibleFiles.length === 0 ? (
+        <div className="px-6 py-14 text-center text-sm text-muted-foreground">No matching files or folders.</div>
+      ) : null}
       <div className="hidden items-center gap-3 bg-muted/50 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground sm:flex">
         <span className="flex-1">Name</span>
         <span className="w-24 shrink-0 text-right">Size</span>
@@ -128,7 +178,7 @@ export function FileList({
         <span className="w-8 shrink-0" />
       </div>
 
-      {folders.map((folder) => (
+      {visibleFolders.map((folder) => (
         <div
           key={folder._id}
           className="group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-accent/70"
@@ -186,7 +236,7 @@ export function FileList({
         </div>
       ))}
 
-      {files.map((file) => {
+      {visibleFiles.map((file) => {
         const Icon = iconForFile(file.name);
         const download = downloads[file._id];
         const uploading = file.status === "uploading";
