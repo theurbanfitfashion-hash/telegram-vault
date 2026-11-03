@@ -26,7 +26,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import type { ListedFile } from "./FileList";
 
 /**
@@ -34,6 +34,8 @@ import type { ListedFile } from "./FileList";
  * tab or save to disk instead of being pulled through the tab's memory.
  */
 const TEXT_RENDER_LIMIT = 2 * 1024 * 1024;
+
+const VideoPlayer = lazy(() => import("./VideoPlayer"));
 
 const KIND_ICON: Record<ViewerKind, LucideIcon> = {
   image: ImageIcon,
@@ -240,18 +242,13 @@ function ViewerSurface({
 
       case "video":
         return (
-          <div className="flex h-full items-center justify-center bg-black/90 p-3">
-            <video
+          <Suspense fallback={<Working label="Loading video player…" />}>
+            <VideoPlayer
               src={source}
-              controls
-              preload="metadata"
-              playsInline
-              className="max-h-full max-w-full"
-              onError={() =>
-                setBodyError("This video couldn't be played in the browser.")
-              }
+              title={file.name}
+              onError={() => setBodyError("This video couldn't be played in the browser. The format or codec may not be supported by this browser.")}
             />
-          </div>
+          </Suspense>
         );
 
       case "audio":
