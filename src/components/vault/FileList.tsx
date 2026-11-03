@@ -77,29 +77,145 @@ function isImageFile(file: ListedFile) {
   return file.mimeType.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp", "svg", "heic", "avif", "bmp"].includes(ext);
 }
 
+function isVideoFile(file: ListedFile) {
+  return file.mimeType.startsWith("video/") || ["mp4", "mov", "mkv", "webm", "avi", "m4v"].includes(fileExtension(file.name));
+}
+
+function isAudioFile(file: ListedFile) {
+  return file.mimeType.startsWith("audio/") || ["mp3", "m4a", "aac", "wav", "flac", "ogg", "oga", "opus", "wma"].includes(fileExtension(file.name));
+}
+
+function synchsafeSize(bytes: Uint8Array, offset: number) {
+  return ((bytes[offset] & 0x7f) << 21) | ((bytes[offset + 1] & 0x7f) << 14) |
+    ((bytes[offset + 2] & 0x7f) << 7) | (bytes[offset + 3] & 0x7f);
+}
+
+function extractMp3Artwork(buffer: ArrayBuffer): Blob | null {
+  const bytes = new Uint8Array(buffer);
+  if (bytes.length < 10 || String.fromCharCode(...bytes.slice(0, 3)) !== "ID3") return null;
+  const tagEnd = Math.min(bytes.length, 10 + synchsafeSize(bytes, 6));
+  let offset = 10;
+  while (offset + 10 <= tagEnd) {
+    const frameId = String.fromCharCode(...bytes.slice(offset, offset + 4));
+    if (!/^[A-Z0-9]{4}$/.test(frameId)) break;
+    const frameSize = synchsafeSize(bytes, offset + 4);
+    if (frameSize <= 0 || offset + 10 + frameSize > tagEnd) break;
+    if (frameId === "APIC") {
+      const frame = bytes.slice(offset + 10, offset + 10 + frameSize);
+      const encoding = frame[0];
+      let cursor = 1;
+      while (cursor < frame.length && frame[cursor] !== 0) cursor++;
+      const mime = new TextDecoder().decode(frame.slice(1, cursor)) || "image/jpeg";
+      cursor += 1; // MIME terminator
+      cursor += 1; // picture type
+      if (encoding === 1 || encoding === 2) {
+        while (cursor + 1 < frame.length && (frame[cursor] !== 0 || frame[cursor + 1] !== 0)) cursor += 2;
+        cursor += 2;
+      } else {
+        while (cursor < frame.length && frame[cursor] !== 0) cursor++;
+        cursor += 1;
+      }
+      if (cursor < frame.length) return new Blob([frame.slice(cursor)], { type: mime });
+    }
+    offset += 10 + frameSize;
+  }
+  return null;
+}
+
 function FileThumbnail({ file, className }: { file: ListedFile; className?: string }) {
   const createDownloadToken = useMutation(api.vault.createDownloadToken);
   const [src, setSrc] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const image = isImageFile(file);
+  const video = isVideoFile(file);
+  const audio = isAudioFile(file);
   const Icon = iconForFile(file.name);
 
   useEffect(() => {
-    if (!image || file.status !== "ready") return;
+    if (file.status !== "ready" || (!image && !video && !audio)) return;
     let cancelled = false;
+    let objectUrl: string | null = null;
+    let videoElement: HTMLVideoElement | null = null;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+
     createDownloadToken({ fileId: file._id })
-      .then((token) => {
+      .then(async (token) => {
         const site = convexSiteUrl();
-        if (site && !cancelled) setSrc(`${site}/file/${token}`);
+        if (!site || cancelled) return;
+        const url = `${site}/file/${token}`;
+        setSrc(url);
+
+        if (audio && fileExtension(file.name) === "mp3") {
+          try {
+            const response = await fetch(url, { headers: { Range: "bytes=0-1048575" } });
+            if (!response.ok) return;
+            const artwork = extractMp3Artwork(await response.arrayBuffer());
+            if (artwork && !cancelled) {
+              objectUrl = URL.createObjectURL(artwork);
+              setPreview(objectUrl);
+            }
+          } catch { /* MP3s without readable ID3 artwork use the music icon. */ }
+        }
+
+        if (video) {
+          videoElement = document.createElement("video");
+          videoElement.crossOrigin = "anonymous";
+          videoElement.muted = true;
+          videoElement.preload = "metadata";
+          videoElement.playsInline = true;
+          videoElement.src = url;
+          const capture = () => {
+            if (!videoElement || cancelled || !videoElement.videoWidth) return;
+            try {
+              const canvas = document.createElement("canvas");
+              canvas.width = videoElement.videoWidth;
+              canvas.height = videoElement.videoHeight;
+              const context = canvas.getContext("2d");
+              if (!context) return;
+              context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+              canvas.toBlob((blob) => {
+                if (blob && !cancelled) {
+                  objectUrl = URL.createObjectURL(blob);
+                  setPreview(objectUrl);
+                }
+              }, "image/jpeg", 0.78);
+            } catch { /* Unsupported/tainted video frame: keep the video icon. */ }
+          };
+          videoElement.addEventListener("loadedmetadata", () => {
+            if (!videoElement || cancelled) return;
+            const seekTo = Math.min(1, Math.max(0, (videoElement.duration || 1) / 4));
+            if (seekTo === 0) capture();
+            else {
+              videoElement.addEventListener("seeked", capture, { once: true });
+              videoElement.currentTime = seekTo;
+            }
+          }, { once: true });
+          videoElement.addEventListener("error", () => { if (!cancelled) setFailed(true); }, { once: true });
+          timeout = setTimeout(capture, 9000);
+          videoElement.load();
+        }
       })
       .catch(() => { if (!cancelled) setFailed(true); });
-    return () => { cancelled = true; };
-  }, [createDownloadToken, file._id, file.status, image]);
+
+    return () => {
+      cancelled = true;
+      if (timeout) clearTimeout(timeout);
+      videoElement?.pause();
+      if (videoElement) {
+        videoElement.removeAttribute("src");
+        videoElement.load();
+      }
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [createDownloadToken, file._id, file.status, file.name, image, video, audio]);
 
   return (
     <span className={cn("grid shrink-0 place-items-center overflow-hidden rounded-lg bg-muted text-muted-foreground", className)}>
       {image && src && !failed ? (
         <img src={src} alt={file.name} loading="lazy" className="h-full w-full object-cover" onError={() => setFailed(true)} />
+      ) : preview && !failed ? (
+        <img src={preview} alt={`${file.name} thumbnail`} loading="lazy" className="h-full w-full object-cover" />
       ) : <Icon className="size-5" />}
     </span>
   );
