@@ -68,7 +68,7 @@ export function UploadQueue({
 
               <div className="min-w-0 flex-1 space-y-1.5">
                 <div className="flex items-baseline justify-between gap-3">
-                  <p className="min-w-0 truncate text-sm">{entry.name}</p>
+                  <p className="min-w-0 truncate text-sm">{entry.name} <span className="text-muted-foreground">· Worker {entry.workerIndex + 1}</span></p>
                   <p
                     className={cn(
                       "shrink-0 font-mono-nums text-xs",

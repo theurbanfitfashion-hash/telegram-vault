@@ -12,6 +12,8 @@ export interface UploadState {
   loaded: number;
   chunkIndex: number;
   chunkCount: number;
+  workerIndex: number;
+  workerCount: number;
   phase: "uploading" | "storing" | "done" | "error";
   error?: string;
 }
@@ -92,7 +94,7 @@ export function useTransfer() {
   }: {
     file: File;
     folderId: Id<"folders"> | null;
-    onPatch: (patch: UploadPatch) => void;
+    onPatch: (patch: UploadPatch, workerIndex: number) => void;
   }): Promise<Id<"files">> {
     const name = file.name.slice(0, MAX_NAME_LENGTH) || "untitled";
     const { fileId, chunkCount } = await createFile({
@@ -101,57 +103,68 @@ export function useTransfer() {
       mimeType: file.type || "application/octet-stream",
       folderId,
     });
-    onPatch({ fileId, name, size: file.size, chunkCount });
-
-    let confirmedBytes = 0;
-    let estimatedLoaded = 0;
+    const concurrency = Math.min(2, chunkCount);
+    const confirmedBytes = Array.from({ length: concurrency }, () => 0);
+    const estimatedLoaded = Array.from({ length: concurrency }, () => 0);
     const inFlightProgress = new Map<number, number>();
-    const reportProgress = () => {
-      const activeBytes = [...inFlightProgress.values()].reduce((sum, value) => sum + value, 0);
-      estimatedLoaded = Math.max(
-        estimatedLoaded,
-        Math.min(file.size, confirmedBytes + activeBytes),
+    const workerSize = (workerIndex: number) => {
+      let total = 0;
+      for (let index = workerIndex; index < chunkCount; index += concurrency) {
+        total += Math.min(CHUNK_BYTES, file.size - index * CHUNK_BYTES);
+      }
+      return total;
+    };
+    for (let workerIndex = 0; workerIndex < concurrency; workerIndex++) {
+      onPatch({
+        fileId, name, size: workerSize(workerIndex), chunkCount,
+        workerIndex, workerCount: concurrency, loaded: 0,
+      }, workerIndex);
+    }
+    const reportProgress = (workerIndex: number) => {
+      const activeBytes = inFlightProgress.get(workerIndex) ?? 0;
+      estimatedLoaded[workerIndex] = Math.max(
+        estimatedLoaded[workerIndex],
+        Math.min(workerSize(workerIndex), confirmedBytes[workerIndex] + activeBytes),
       );
-      onPatch({ loaded: estimatedLoaded });
+      onPatch({ loaded: estimatedLoaded[workerIndex] }, workerIndex);
     };
     try {
       // Two workers send independently. Every part carries its immutable
       // zero-based index; the backend stores handles by index and assembles
       // the final ordered array only after every index has arrived.
-      const uploadPart = async (index: number) => {
+      const uploadPart = async (index: number, workerIndex: number) => {
         const start = index * CHUNK_BYTES;
         const slice = file.slice(start, Math.min(start + CHUNK_BYTES, file.size));
-        onPatch({ phase: "uploading", chunkIndex: index });
+        onPatch({ phase: "uploading", chunkIndex: index }, workerIndex);
 
         const uploadUrl = await getChunkUploadUrl({ fileId, index });
         const storageId = await postSlice(uploadUrl, slice, (loaded) => {
-          inFlightProgress.set(index, Math.min(loaded, slice.size));
-          onPatch({ phase: "uploading", chunkIndex: index });
-          reportProgress();
+          onPatch({ phase: "uploading", chunkIndex: index }, workerIndex);
+          inFlightProgress.set(workerIndex, Math.min(loaded, slice.size));
+          reportProgress(workerIndex);
         });
 
-        onPatch({ phase: "storing", chunkIndex: index });
-        inFlightProgress.set(index, slice.size);
-        reportProgress();
+        onPatch({ phase: "storing", chunkIndex: index }, workerIndex);
+        inFlightProgress.set(workerIndex, slice.size);
+        reportProgress(workerIndex);
         await sendChunk({ fileId, index, storageId });
 
-        inFlightProgress.delete(index);
-        confirmedBytes += slice.size;
-        reportProgress();
+        inFlightProgress.delete(workerIndex);
+        confirmedBytes[workerIndex] += slice.size;
+        reportProgress(workerIndex);
       };
 
-      let nextIndex = 0;
-      const worker = async () => {
-        while (nextIndex < chunkCount) {
-          const index = nextIndex++;
-          await uploadPart(index);
+      const worker = async (workerIndex: number) => {
+        for (let index = workerIndex; index < chunkCount; index += concurrency) {
+          await uploadPart(index, workerIndex);
         }
       };
-      const concurrency = Math.min(2, chunkCount);
-      await Promise.all(Array.from({ length: concurrency }, () => worker()));
+      await Promise.all(Array.from({ length: concurrency }, (_, workerIndex) => worker(workerIndex)));
 
       await finishUpload({ fileId });
-      onPatch({ phase: "done", loaded: file.size });
+      for (let workerIndex = 0; workerIndex < concurrency; workerIndex++) {
+        onPatch({ phase: "done", loaded: workerSize(workerIndex) }, workerIndex);
+      }
       return fileId;
     } catch (error) {
       // Never leave a half-written record (or its parts) behind.

@@ -170,10 +170,11 @@ export default function Dashboard() {
     mainRef.current?.scrollTo({ top: 0 });
   }, [activeId]);
 
-  const patchUpload = useCallback((key: string, patch: UploadPatch) => {
+  const patchUpload = useCallback((key: string, workerIndex: number, patch: UploadPatch) => {
+    const rowKey = `${key}-worker-${workerIndex}`;
     setUploads((current) =>
       current.map((entry) =>
-        entry.key === key ? { ...entry, ...patch } : entry,
+        entry.key === rowKey ? { ...entry, ...patch } : entry,
       ),
     );
   }, []);
@@ -188,28 +189,38 @@ export default function Dashboard() {
       if (chosen.length === 0) return;
       for (const file of chosen) {
         const key = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const chunkCount = Math.max(1, Math.ceil(file.size / CHUNK_BYTES));
+        const workerCount = Math.min(2, chunkCount);
         setUploads((current) => [
           ...current,
-          {
-            key,
+          ...Array.from({ length: workerCount }, (_, workerIndex) => ({
+            key: `${key}-worker-${workerIndex}`,
             fileId: null,
             name: file.name,
-            size: file.size,
+            size: Math.ceil(file.size / workerCount),
             loaded: 0,
-            chunkIndex: 0,
-            chunkCount: Math.max(1, Math.ceil(file.size / CHUNK_BYTES)),
-            phase: "uploading",
-          },
+            chunkIndex: workerIndex,
+            chunkCount,
+            workerIndex,
+            workerCount,
+            phase: "uploading" as const,
+          })),
         ]);
         try {
           await uploadFile({
             file,
             folderId: activeId,
-            onPatch: (patch) => patchUpload(key, patch),
+            onPatch: (patch, workerIndex) => patchUpload(key, workerIndex, patch),
           });
-          window.setTimeout(() => dismissUpload(key), 3000);
+          window.setTimeout(() => {
+            for (let workerIndex = 0; workerIndex < workerCount; workerIndex++) {
+              dismissUpload(`${key}-worker-${workerIndex}`);
+            }
+          }, 3000);
         } catch (error) {
-          patchUpload(key, { phase: "error", error: errorMessage(error) });
+          for (let workerIndex = 0; workerIndex < workerCount; workerIndex++) {
+            patchUpload(key, workerIndex, { phase: "error", error: errorMessage(error) });
+          }
         }
       }
     },
