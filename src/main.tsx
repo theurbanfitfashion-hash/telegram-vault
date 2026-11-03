@@ -11,6 +11,7 @@ import "./index.css";
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
+const Music = lazy(() => import("./pages/Music.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -81,6 +82,14 @@ createRoot(document.getElementById("root")!).render(
                 element={
                   <RequireAuth>
                     <Dashboard />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/music"
+                element={
+                  <RequireAuth title="Sign in to listen to your music" description="Your personal music library is private to your vault.">
+                    <Music />
                   </RequireAuth>
                 }
               />
