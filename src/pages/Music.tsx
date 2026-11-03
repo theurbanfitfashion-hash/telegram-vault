@@ -33,7 +33,7 @@ function clock(value: number) {
 
 export default function Music() {
   const navigate = useNavigate();
-  const files = useQuery(api.vault.listFiles, { folderId: null });
+  const files = useQuery(api.vault.listAllFiles, {});
   const createToken = useMutation(api.vault.createDownloadToken);
   const tracks = useMemo(() => (files ?? []).filter((file) => file.status === "ready" && isAudio(file)), [files]);
   const [activeId, setActiveId] = useState<Id<"files"> | null>(null);
@@ -176,11 +176,11 @@ export default function Music() {
 
           <aside className="mx-auto w-full max-w-xl overflow-hidden rounded-3xl border border-white/10 bg-white/[0.035]">
             <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-              <div><p className="font-semibold">Your playlist</p><p className="mt-1 text-xs text-white/40">{tracks.length} {tracks.length === 1 ? "track" : "tracks"} · Root folder</p></div>
+              <div><p className="font-semibold">Your playlist</p><p className="mt-1 text-xs text-white/40">{tracks.length} {tracks.length === 1 ? "track" : "tracks"} · All folders</p></div>
               <ListMusic className="size-5 text-cyan-300" />
             </div>
             {tracks.length === 0 ? (
-              <div className="px-6 py-16 text-center"><Disc3 className="mx-auto size-9 text-white/25" /><p className="mt-4 font-medium">No music found yet</p><p className="mt-2 text-sm leading-6 text-white/45">Upload MP3, M4A, WAV, FLAC or OGG files to the Vault root folder.</p><Button className="mt-5 bg-cyan-300 text-slate-950 hover:bg-cyan-200" onClick={() => navigate("/dashboard")}>Open Vault</Button></div>
+              <div className="px-6 py-16 text-center"><Disc3 className="mx-auto size-9 text-white/25" /><p className="mt-4 font-medium">No music found yet</p><p className="mt-2 text-sm leading-6 text-white/45">Upload MP3, M4A, WAV, FLAC or OGG files anywhere in your Vault.</p><Button className="mt-5 bg-cyan-300 text-slate-950 hover:bg-cyan-200" onClick={() => navigate("/dashboard")}>Open Vault</Button></div>
             ) : (
               <div className="max-h-[520px] overflow-y-auto p-2">
                 <AnimatePresence initial={false}>
