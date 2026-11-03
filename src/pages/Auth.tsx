@@ -92,9 +92,10 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
     try {
       await signIn("bot-token-guest", { botToken: botToken.trim() });
+      setBotToken("");
       navigate(redirect, { replace: true });
     } catch (caught) {
-      console.error("Guest bot sign-in error:", caught);
+      // Never log credentials: the token grants access to the shared vault.
       setError(caught instanceof Error ? caught.message : "Could not verify this Telegram bot token.");
       setIsLoading(false);
     }
@@ -182,6 +183,30 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 <Button type="button" variant="outline" className="w-full" onClick={handleGoogleLogin} disabled={isLoading}>
                   <GoogleIcon className="mr-2 h-4 w-4" /> Continue with Google
                 </Button>
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
+                  <div className="relative flex justify-center text-xs uppercase"><span className="bg-background px-2 text-muted-foreground">Shared guest vault</span></div>
+                </div>
+                <form onSubmit={handleGuestLogin} className="space-y-2">
+                  <Input
+                    type="password"
+                    name="botToken"
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    maxLength={256}
+                    placeholder="Telegram bot token"
+                    aria-label="Telegram bot token"
+                    value={botToken}
+                    onChange={(event) => setBotToken(event.target.value)}
+                    disabled={isLoading}
+                    required
+                  />
+                  <Button type="submit" variant="secondary" className="w-full" disabled={isLoading || !botToken.trim()}>
+                    {isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Verifying bot...</> : <><Bot className="mr-2 h-4 w-4" /> Open shared guest vault</>}
+                  </Button>
+                  <p className="text-xs text-muted-foreground">Anyone with this bot token can access the same shared vault. Keep it private.</p>
+                </form>
                 {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
               </CardContent>
             </>
