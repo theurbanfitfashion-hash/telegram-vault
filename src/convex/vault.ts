@@ -529,7 +529,8 @@ export const saveTelegramConfig = internalMutation({
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .unique();
     const botChanged =
-      existing?.botId !== undefined && existing.botId !== botId;
+      (existing?.botId !== undefined && existing.botId !== botId) ||
+      (existing?.botUsername !== undefined && existing.botUsername !== botUsername);
     if (existing) {
       await ctx.db.patch(existing._id, {
         botId,
