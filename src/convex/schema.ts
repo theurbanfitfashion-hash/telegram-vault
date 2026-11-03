@@ -74,11 +74,23 @@ const schema = defineSchema(
     telegramConfig: defineTable({
       userId: v.id("users"),
       botToken: v.optional(v.string()),
+      botId: v.optional(v.string()),
       botUsername: v.optional(v.string()),
       chatId: v.optional(v.string()),
       chatTitle: v.optional(v.string()),
       updatedAt: v.number(),
     }).index("by_user", ["userId"]),
+
+    // One canonical Telegram storage destination per bot, shared by all app accounts.
+    // The bot token is a secret and is never used as a database key.
+    telegramBots: defineTable({
+      botId: v.string(),
+      botToken: v.string(),
+      botUsername: v.string(),
+      chatId: v.optional(v.string()),
+      chatTitle: v.optional(v.string()),
+      updatedAt: v.number(),
+    }).index("by_bot_id", ["botId"]),
 
     // One shared guest vault per Telegram bot. The bot token is never used as a database key.
     guestBotVaults: defineTable({
