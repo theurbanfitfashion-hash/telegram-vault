@@ -340,43 +340,54 @@ export const sendChunk = action({
     storageId: v.id("_storage"),
   },
   handler: async (ctx, { fileId, index, storageId }) => {
-    const userId = await requireUser(ctx);
-    const file = await ctx.runQuery(internal.vault.getFileForUpload, {
-      fileId,
-      userId,
-    });
-    if (!file) throw new Error("This upload no longer exists.");
-    if (index < 0 || index >= file.chunkCount) {
-      throw new Error("That part is out of range.");
+    let stage = "checking your account";
+    try {
+      const userId = await requireUser(ctx);
+      stage = "checking the upload record";
+      const file = await ctx.runQuery(internal.vault.getFileForUpload, {
+        fileId,
+        userId,
+      });
+      if (!file) throw new ConvexError("This upload no longer exists.");
+      if (index < 0 || index >= file.chunkCount) {
+        throw new ConvexError("That part is out of range.");
+      }
+
+      stage = "checking your Telegram connection";
+      const { token, chatId } = await requireConnection(ctx, userId);
+      stage = "reading the temporary upload part";
+      const blob = await ctx.storage.get(storageId);
+      if (!blob) {
+        throw new ConvexError("That part expired before it reached Telegram — retry it.");
+      }
+
+      const form = new FormData();
+      form.append("chat_id", chatId);
+      form.append("disable_notification", "true");
+      form.append("document", blob, partName(file.name, index, file.chunkCount));
+
+      stage = "sending the file to Telegram";
+      const message = await telegram<TelegramMessage>("sendDocument", token, {
+        form,
+      });
+      const telegramFileId = message.document?.file_id;
+      if (!telegramFileId) {
+        throw new ConvexError("Telegram accepted the part but gave back no file handle.");
+      }
+
+      stage = "saving the Telegram file reference";
+      await ctx.runMutation(internal.vault.recordPart, {
+        fileId,
+        index,
+        telegramFileId,
+        messageId: message.message_id,
+      });
+      await ctx.storage.delete(storageId).catch(() => {});
+      return { ok: true };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new ConvexError(`Upload failed while ${stage}: ${detail}`);
     }
-
-    const { token, chatId } = await requireConnection(ctx, userId);
-    const blob = await ctx.storage.get(storageId);
-    if (!blob) {
-      throw new Error("That part expired before it reached Telegram — retry it.");
-    }
-
-    const form = new FormData();
-    form.append("chat_id", chatId);
-    form.append("disable_notification", "true");
-    form.append("document", blob, partName(file.name, index, file.chunkCount));
-
-    const message = await telegram<TelegramMessage>("sendDocument", token, {
-      form,
-    });
-    const telegramFileId = message.document?.file_id;
-    if (!telegramFileId) {
-      throw new Error("Telegram accepted the part but gave back no handle.");
-    }
-
-    await ctx.runMutation(internal.vault.recordPart, {
-      fileId,
-      index,
-      telegramFileId,
-      messageId: message.message_id,
-    });
-    await ctx.storage.delete(storageId).catch(() => {});
-    return { ok: true };
   },
 });
 
