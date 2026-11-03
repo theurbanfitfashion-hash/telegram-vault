@@ -142,7 +142,14 @@ export function FileList({
   const [search, setSearch] = useState("");
   const [sortField, setSortField] = useState<"date" | "size" | "name" | "type">("date");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
-  const [viewMode, setViewMode] = useState<"list" | "grid">("list");
+  const [viewMode, setViewMode] = useState<"list" | "grid">(() => {
+    if (typeof window === "undefined") return "list";
+    return window.localStorage.getItem("telegram-vault-file-view") === "grid" ? "grid" : "list";
+  });
+
+  useEffect(() => {
+    window.localStorage.setItem("telegram-vault-file-view", viewMode);
+  }, [viewMode]);
   const sortLabel = {
     date: "Date modified",
     size: "Size",
@@ -366,6 +373,13 @@ export function FileList({
                 </span>
               ) : null}
             </button>
+            {viewMode === "grid" ? (
+              <div className="grid w-full grid-cols-2 gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                <span className="truncate">Type: {fileExtension(file.name).toUpperCase() || "Unknown"}</span>
+                <span className="text-right">Size: {uploading ? "—" : formatBytes(file.size)}</span>
+                <span className="col-span-2 truncate">Modified: {formatDate(file.createdAt)}</span>
+              </div>
+            ) : null}
             <span className={cn("w-24 shrink-0 text-right font-mono-nums text-xs text-muted-foreground", viewMode === "grid" ? "hidden" : "hidden sm:block")}>
               {uploading ? "—" : formatBytes(file.size)}
             </span>
