@@ -332,6 +332,7 @@ export default function Dashboard() {
       activeId={activeId}
       activePathIds={activePathIds}
       status={status}
+      storageUsage={storageUsage}
       userLabel={user?.email ?? user?.name ?? "Signed in"}
       onSelect={(id) => navigateTo(id)}
       onNewFolder={() => setDialog({ kind: "newFolder" })}
@@ -680,6 +681,7 @@ function SidebarBody({
   activeId,
   activePathIds,
   status,
+  storageUsage,
   userLabel,
   onSelect,
   onNewFolder,
@@ -693,6 +695,7 @@ function SidebarBody({
   activeId: Id<"folders"> | null;
   activePathIds: Set<string>;
   status: TelegramStatus;
+  storageUsage: number | undefined;
   userLabel: string;
   onSelect: (id: Id<"folders"> | null) => void;
   onNewFolder: () => void;
