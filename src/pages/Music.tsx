@@ -7,10 +7,12 @@ import { useMutation, useQuery } from "convex/react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowLeft, AudioLines, Disc3, ListMusic, Loader2, Pause, Play,
-  Repeat, Repeat1, SkipBack, SkipForward, Shuffle, Volume2, VolumeX,
+  Repeat, Repeat1, SkipBack, SkipForward, Shuffle, Volume2, VolumeX, ListPlus, Plus, X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
+
+type SavedPlaylist = { id: string; name: string; trackIds: string[] };
 
 type Track = {
   _id: Id<"files">;
@@ -47,8 +49,39 @@ export default function Music() {
   const [muted, setMuted] = useState(false);
   const [shuffle, setShuffle] = useState(false);
   const [repeat, setRepeat] = useState<"off" | "all" | "one">("off");
+  const [upNext, setUpNext] = useState<Id<"files">[]>([]);
+  const [playlists, setPlaylists] = useState<SavedPlaylist[]>(() => {
+    try { return JSON.parse(localStorage.getItem("telegram-vault:music-playlists:v1") ?? "[]") as SavedPlaylist[]; }
+    catch { return []; }
+  });
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState("all");
   const audioRef = useRef<HTMLAudioElement>(null);
+  const visibleTracks = selectedPlaylistId === "all"
+    ? tracks
+    : tracks.filter((track) => playlists.find((list) => list.id === selectedPlaylistId)?.trackIds.includes(track._id));
   const activeTrack = tracks.find((track) => track._id === activeId) ?? tracks[0] ?? null;
+
+  useEffect(() => {
+    localStorage.setItem("telegram-vault:music-playlists:v1", JSON.stringify(playlists));
+  }, [playlists]);
+
+  const createPlaylist = () => {
+    const name = window.prompt("Name your playlist");
+    if (!name?.trim()) return;
+    const playlist = { id: crypto.randomUUID(), name: name.trim(), trackIds: activeTrack ? [activeTrack._id] : [] };
+    setPlaylists((current) => [...current, playlist]);
+    setSelectedPlaylistId(playlist.id);
+  };
+
+  const addToPlaylist = (playlistId: string, trackId: Id<"files">) => {
+    setPlaylists((current) => current.map((list) => list.id !== playlistId ? list : {
+      ...list, trackIds: list.trackIds.includes(trackId) ? list.trackIds : [...list.trackIds, trackId],
+    }));
+  };
+
+  const playNext = (trackId: Id<"files">) => {
+    setUpNext((current) => [...current.filter((id) => id !== trackId), trackId]);
+  };
 
   useEffect(() => {
     if (!activeId && tracks.length) setActiveId(tracks[0]._id);
@@ -93,16 +126,23 @@ export default function Music() {
 
   const next = useCallback(() => {
     if (!tracks.length) return;
-    const index = tracks.findIndex((track) => track._id === activeTrack?._id);
+    if (upNext.length) {
+      setActiveId(upNext[0]);
+      setUpNext((current) => current.slice(1));
+      setPlaying(false);
+      return;
+    }
+    const queueTracks = visibleTracks.length ? visibleTracks : tracks;
+    const index = queueTracks.findIndex((track) => track._id === activeTrack?._id);
     if (shuffle && tracks.length > 1) {
       let random = index;
       while (random === index) random = Math.floor(Math.random() * tracks.length);
       setActiveId(tracks[random]._id);
-    } else if (index < tracks.length - 1) setActiveId(tracks[index + 1]._id);
-    else if (repeat === "all") setActiveId(tracks[0]._id);
+    } else if (index < queueTracks.length - 1) setActiveId(queueTracks[index + 1]._id);
+    else if (repeat === "all") setActiveId(queueTracks[0]._id);
     else setPlaying(false);
     setPlaying(false);
-  }, [tracks, activeTrack?._id, shuffle, repeat]);
+  }, [tracks, visibleTracks, upNext, activeTrack?._id, shuffle, repeat]);
 
   const previous = useCallback(() => {
     const audio = audioRef.current;
@@ -175,25 +215,44 @@ export default function Music() {
 
           <aside className="mx-auto w-full max-w-xl overflow-hidden rounded-3xl border border-white/10 bg-white/[0.035]">
             <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-              <div><p className="font-semibold">Your playlist</p><p className="mt-1 text-xs text-white/40">{tracks.length} {tracks.length === 1 ? "track" : "tracks"} · All folders</p></div>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold">Your music</p>
+                <p className="mt-1 text-xs text-white/40">{visibleTracks.length} tracks · {upNext.length} queued next</p>
+              </div>
+              <button aria-label="Create playlist" title="Create playlist" onClick={createPlaylist} className="rounded-lg p-2 text-cyan-300 hover:bg-white/10"><Plus className="size-5" /></button>
               <ListMusic className="size-5 text-cyan-300" />
+            </div>
+            <div className="border-b border-white/10 px-4 py-3">
+              <select aria-label="Choose playlist" value={selectedPlaylistId} onChange={(event) => setSelectedPlaylistId(event.target.value)} className="w-full rounded-lg border border-white/10 bg-[#111b29] px-3 py-2 text-sm text-white">
+                <option value="all">All songs</option>
+                {playlists.map((list) => <option key={list.id} value={list.id}>{list.name} ({list.trackIds.length})</option>)}
+              </select>
             </div>
             {tracks.length === 0 ? (
               <div className="px-6 py-16 text-center"><Disc3 className="mx-auto size-9 text-white/25" /><p className="mt-4 font-medium">No music found yet</p><p className="mt-2 text-sm leading-6 text-white/45">Upload MP3, M4A, WAV, FLAC or OGG files anywhere in your Vault.</p><Button className="mt-5 bg-cyan-300 text-slate-950 hover:bg-cyan-200" onClick={() => navigate("/dashboard")}>Open Vault</Button></div>
             ) : (
               <div className="max-h-[520px] overflow-y-auto p-2">
                 <AnimatePresence initial={false}>
-                  {tracks.map((track, index) => {
+                  {visibleTracks.map((track, index) => {
                     const selected = track._id === activeTrack?._id;
                     return <motion.button key={track._id} layout initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} onClick={() => void playTrack(track._id)} className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors ${selected ? "bg-cyan-300/10" : "hover:bg-white/[0.06]"}`}>
                       <span className={`grid size-10 shrink-0 place-items-center rounded-xl ${selected ? "bg-cyan-300 text-slate-950" : "bg-white/[0.07] text-white/55"}`}>{selected && playing ? <AudioLines className="size-4" /> : <span className="font-mono text-xs">{String(index + 1).padStart(2, "0")}</span>}</span>
                       <span className="min-w-0 flex-1"><span className={`block truncate text-sm font-medium ${selected ? "text-cyan-200" : "text-white/85"}`}>{titleOf(track.name)}</span><span className="mt-1 block text-xs text-white/40">{formatBytes(track.size)}</span></span>
-                      {selected ? <Pause className="size-4 text-cyan-300" /> : <Play className="size-4 text-white/35" />}
+                      <span className="flex shrink-0 items-center gap-1">
+                        <button type="button" title="Play this next" aria-label={`Play ${titleOf(track.name)} next`} onClick={(event) => { event.stopPropagation(); playNext(track._id); }} className="rounded-md p-1.5 text-white/35 hover:bg-white/10 hover:text-cyan-200"><SkipForward className="size-4" /></button>
+                        {playlists.length > 0 && <button type="button" title="Add to playlist" aria-label={`Add ${titleOf(track.name)} to playlist`} onClick={(event) => { event.stopPropagation(); const target = selectedPlaylistId === "all" ? playlists[0] : playlists.find((list) => list.id === selectedPlaylistId); if (target) addToPlaylist(target.id, track._id); }} className="rounded-md p-1.5 text-white/35 hover:bg-white/10 hover:text-cyan-200"><ListPlus className="size-4" /></button>}
+                        {selected ? <Pause className="size-4 text-cyan-300" /> : <Play className="size-4 text-white/35" />}
+                      </span>
                     </motion.button>;
                   })}
                 </AnimatePresence>
               </div>
             )}
+            {playlists.length > 0 && <div className="border-t border-white/10 px-4 py-3 text-xs text-white/45">Select a playlist, then use <ListPlus className="inline size-3.5" /> on a song to add it. New playlists start with the current song.</div>}
+            {upNext.length > 0 && <div className="border-t border-white/10 px-4 py-3">
+              <div className="mb-2 flex items-center justify-between text-xs font-semibold text-white/60"><span>Up next ({upNext.length})</span><button onClick={() => setUpNext([])} className="text-white/40 hover:text-white">Clear</button></div>
+              {upNext.slice(0, 3).map((id) => <div key={id} className="flex items-center justify-between py-1 text-xs text-white/55"><span className="truncate">{titleOf(tracks.find((track) => track._id === id)?.name ?? "Unavailable track")}</span><button aria-label="Remove from queue" onClick={() => setUpNext((current) => current.filter((item) => item !== id))}><X className="size-3.5" /></button></div>)}
+            </div>}
           </aside>
         </section>
         <footer className="text-center text-[11px] tracking-wide text-white/25">PRIVATE AUDIO LIBRARY · STORED IN YOUR TELEGRAM CHAT</footer>
