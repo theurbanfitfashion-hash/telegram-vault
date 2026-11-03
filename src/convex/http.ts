@@ -247,7 +247,8 @@ function streamRange(
  */
 const downloadWhole = httpAction(async (ctx, request) => {
   try {
-    const { pathname } = new URL(request.url);
+    const url = new URL(request.url);
+    const { pathname } = url;
     const [, route, token] = pathname.split("/");
     if (route !== "file" || !token) return textResponse(404, "Not found");
   
@@ -258,7 +259,9 @@ const downloadWhole = httpAction(async (ctx, request) => {
     const headers: Record<string, string> = {
       ...CORS_HEADERS,
       "Content-Type": contentType,
-      "Content-Disposition": inlineDisposition(file.fileName),
+      "Content-Disposition": url.searchParams.get("download") === "1"
+        ? attachmentDisposition(file.fileName)
+        : inlineDisposition(file.fileName),
       "Accept-Ranges": "bytes",
       "Cache-Control": "private, max-age=600",
       "X-Content-Type-Options": "nosniff",
