@@ -410,7 +410,7 @@ export default function Dashboard() {
               <FolderPlus className="mr-2 size-4" />
               <span className="hidden sm:inline">New folder</span>
             </Button>
-            <Button size="sm" variant="outline" onClick={() => navigate("/music")}>
+            <Button size="sm" variant="outline" onClick={() => { const player = window.open(`${window.location.origin}/music`, "telegram-vault-music", "popup=yes,width=460,height=820,resizable=yes,scrollbars=yes"); if (!player) navigate("/music"); else player.focus(); }}>
               <Headphones className="mr-2 size-4" />
               <span className="hidden sm:inline">Music</span>
             </Button>
