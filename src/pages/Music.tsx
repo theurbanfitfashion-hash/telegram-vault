@@ -124,10 +124,9 @@ export default function Music() {
     return () => { cancelled = true; };
   }, [activeTrack?._id, createToken]);
 
-  // Prepare the next two tracks in the background. We create their short-lived
-  // access tokens and warm the first 256 KiB through the same range endpoint,
-  // so Telegram's file path and the browser connection are ready before skip.
-  // Shuffle uses a stable random order for this preload pass too.
+  // Fetch audio only when a track is selected. Background media warming
+  // downloads complete Telegram parts for tiny browser byte-range requests.
+
   useEffect(() => {
     if (!activeTrack || !tracks.length) return;
     let cancelled = false;
