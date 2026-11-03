@@ -80,7 +80,7 @@ async function openPart(
   botToken: string,
   telegramFileId: string,
 ): Promise<ReadableStream<Uint8Array>> {
-  const cacheKey = `${botToken.slice(-12)}:${telegramFileId}`;
+  const cacheKey = `${botToken}:${telegramFileId}`;
   const cached = telegramPathCache.get(cacheKey);
   let fileUrl = cached && cached.expiresAt > Date.now() ? cached.url : null;
 
@@ -97,13 +97,17 @@ async function openPart(
       throw new Error(meta?.description ?? `Telegram getFile failed (HTTP ${metaResponse.status}).`);
     }
     const resolved = `https://api.telegram.org/file/bot${botToken}/${meta.result.file_path}`;
+    if (telegramPathCache.size > 500) {
+      const oldestKey = telegramPathCache.keys().next().value;
+      if (oldestKey) telegramPathCache.delete(oldestKey);
+    }
     telegramPathCache.set(cacheKey, { url: resolved, expiresAt: Date.now() + 50 * 60 * 1000 });
     return resolved;
   };
 
   if (!fileUrl) fileUrl = await resolveUrl();
   let upstream = await fetch(fileUrl);
-  if ((upstream.status === 401 || upstream.status === 404) && cached) {
+  if (upstream.status === 401 || upstream.status === 404) {
     telegramPathCache.delete(cacheKey);
     fileUrl = await resolveUrl();
     upstream = await fetch(fileUrl);
