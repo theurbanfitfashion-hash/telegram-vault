@@ -286,9 +286,14 @@ export function FileList({
           key={folder._id}
           className={cn("group flex items-center gap-3 transition-colors hover:bg-accent/70", viewMode === "grid" ? "min-w-0 flex-col items-stretch rounded-xl border border-border/70 bg-card p-3" : "px-4 py-2.5")}
         >
-          <span className={cn("grid shrink-0 place-items-center rounded-lg bg-[var(--brand-soft)] text-[var(--brand-soft-foreground)]", viewMode === "grid" ? "h-24 w-full" : "size-8")}>
+          <button
+            type="button"
+            onClick={() => onOpenFolder(folder._id)}
+            aria-label={`Open folder ${folder.name}`}
+            className={cn("grid shrink-0 place-items-center rounded-lg bg-[var(--brand-soft)] text-[var(--brand-soft-foreground)] transition-colors hover:brightness-95", viewMode === "grid" ? "h-24 w-full" : "size-8")}
+          >
             <Folder className={cn(viewMode === "grid" ? "size-9" : "size-4")} />
-          </span>
+          </button>
           <button
             type="button"
             onClick={() => onOpenFolder(folder._id)}
@@ -347,13 +352,20 @@ export function FileList({
             key={file._id}
             className={cn("group flex items-center gap-3 transition-colors hover:bg-accent/70", viewMode === "grid" ? "min-w-0 flex-col items-stretch rounded-xl border border-border/70 bg-card p-3" : "px-4 py-2.5")}
           >
-            <span className={cn("relative", viewMode === "grid" ? "w-full" : "shrink-0")}>
+            <button
+              type="button"
+              disabled={uploading}
+              onClick={() => onOpen(file)}
+              title={uploading ? "Still uploading" : `Open ${file.name}`}
+              aria-label={`Preview ${file.name}`}
+              className={cn("relative block shrink-0 overflow-hidden rounded-lg text-left transition-opacity hover:opacity-85 disabled:cursor-default", viewMode === "grid" ? "h-28 w-full" : "size-10")}
+            >
               {download ? (
-                <span className={cn("grid place-items-center rounded-lg bg-muted", viewMode === "grid" ? "h-28 w-full" : "size-10")}><Loader2 className="size-4 animate-spin" /></span>
+                <span className="grid h-full w-full place-items-center rounded-lg bg-muted"><Loader2 className="size-4 animate-spin" /></span>
               ) : (
-                <FileThumbnail file={file} className={viewMode === "grid" ? "h-28 w-full" : "size-10"} />
+                <FileThumbnail file={file} className="h-full w-full" />
               )}
-            </span>
+            </button>
             <button
               type="button"
               disabled={uploading}
