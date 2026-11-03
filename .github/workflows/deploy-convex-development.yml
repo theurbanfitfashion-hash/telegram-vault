@@ -33,5 +33,5 @@ jobs:
 
       - name: Deploy Convex functions to the selected Development deployment
         env:
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEV_DEPLOY_KEY }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
         run: npx convex dev --once
