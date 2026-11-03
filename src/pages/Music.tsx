@@ -172,10 +172,14 @@ export default function Music() {
     else { audio.pause(); setPlaying(false); }
   };
 
+  const audioElement = <audio className="hidden" ref={audioRef} src={source ?? undefined} preload="none" onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)} onCanPlay={() => { if (autoplayAfterLoad.current && audioRef.current) { autoplayAfterLoad.current = false; void audioRef.current.play().then(() => { setPlaybackError(null); setPlaying(true); }).catch((error: unknown) => { console.error("Automatic playback failed", error); setPlaybackError("Tap Play to start this track. Your browser blocked automatic playback."); setPlaying(false); }); } }} onEnded={() => { if (repeat === "one" && audioRef.current) { audioRef.current.currentTime = 0; void audioRef.current.play(); } else next(); }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => { if (source) { setPlaying(false); setPlaybackError("The audio stream could not be loaded. Check the file format or try downloading it."); } }} />;
+
   if (!isAuthenticated || (!isPlayerPage && !isDashboard)) return null;
 
   if (isDashboard) {
     return (
+      <>
+      {audioElement}
       <div className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/95 px-3 py-2 shadow-[0_-8px_30px_rgba(0,0,0,.12)] backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center gap-3">
           <button type="button" onClick={() => navigate("/music")} className="min-w-0 flex-1 text-left">
@@ -194,12 +198,15 @@ export default function Music() {
         </div>
         {activeTrack && duration > 0 && <div className="mx-auto mt-2 h-1 max-w-5xl overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary" style={{ width: `${Math.min(100, (currentTime / duration) * 100)}%` }} /></div>}
       </div>
+      </>
     );
   }
 
-  if (files === undefined) return <main className="grid min-h-dvh place-items-center bg-[#090d13] text-white"><Loader2 className="size-6 animate-spin text-cyan-300" /></main>;
+  if (files === undefined) return <>{audioElement}<main className="grid min-h-dvh place-items-center bg-[#090d13] text-white"><Loader2 className="size-6 animate-spin text-cyan-300" /></main></>;
 
   return (
+    <>
+    {audioElement}
     <main className="min-h-dvh overflow-hidden bg-[#090d13] text-white">
       <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col px-4 pb-8 pt-5 sm:px-8">
         <header className="flex items-center justify-between">
@@ -247,7 +254,7 @@ export default function Music() {
               </div>
             </div>
             {loadingSource ? <p className="mt-4 text-center text-xs text-white/40">Preparing audio stream…</p> : playbackError ? <p role="alert" className="mt-4 text-center text-xs text-rose-300">{playbackError}</p> : activeTrack && !source ? <p className="mt-4 text-center text-xs text-white/40">Audio link is not ready yet.</p> : null}
-            <audio ref={audioRef} src={source ?? undefined} preload="none" onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)} onCanPlay={() => { if (autoplayAfterLoad.current && audioRef.current) { autoplayAfterLoad.current = false; void audioRef.current.play().then(() => { setPlaybackError(null); setPlaying(true); }).catch((error: unknown) => { console.error("Automatic playback failed", error); setPlaybackError("Tap Play to start this track. Your browser blocked automatic playback."); setPlaying(false); }); } }} onEnded={() => { if (repeat === "one" && audioRef.current) { audioRef.current.currentTime = 0; void audioRef.current.play(); } else next(); }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => { if (source) { setPlaying(false); setPlaybackError("The audio stream could not be loaded. Check the file format or try downloading it."); } }} />
+
           </div>
 
           <aside className="mx-auto w-full max-w-xl overflow-hidden rounded-3xl border border-white/10 bg-white/[0.035]">
@@ -299,5 +306,6 @@ export default function Music() {
         <footer className="text-center text-[11px] tracking-wide text-white/25">PRIVATE AUDIO LIBRARY · STORED IN YOUR TELEGRAM CHAT</footer>
       </div>
     </main>
+    </>
   );
 }
