@@ -74,8 +74,8 @@ async function readErrorMessage(response: Response): Promise<string> {
 }
 
 /**
- * Everything that moves bytes: parts are uploaded one at a time (which keeps
- * Telegram's per-chat pacing happy) and downloads stream back part by part.
+ * Everything that moves bytes: browser-to-Convex uploads are pipelined one
+ * part ahead while Telegram sends remain sequential; downloads stream part by part.
  */
 export function useTransfer() {
   const createFile = useMutation(api.vault.createFile);
@@ -120,10 +120,10 @@ export function useTransfer() {
         onPatch({ phase: "uploading", chunkIndex: index, loaded: reportedLoaded });
 
         const uploadUrl = await getChunkUploadUrl({ fileId, index });
-        const storageId = await postSlice(uploadUrl, slice, (loaded) =>
+        const storageId = await postSlice(uploadUrl, slice, (loaded) => {
           onPatch({ phase: "uploading", chunkIndex: index });
           reportLoaded(baseLoaded + Math.min(loaded, slice.size));
-        );
+        });
         return { index, slice, storageId };
       };
 
