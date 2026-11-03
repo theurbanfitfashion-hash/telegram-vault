@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { useAuth } from "@/hooks/use-auth";
+import { PlayerArtwork } from "@/components/vault/PlayerArtwork";
 
 type SavedPlaylist = { id: string; name: string; trackIds: string[] };
 
@@ -180,23 +181,29 @@ export default function Music() {
     return (
       <>
       {audioElement}
-      <div className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/95 px-3 py-2 shadow-[0_-8px_30px_rgba(0,0,0,.12)] backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center gap-3">
-          <button type="button" onClick={() => navigate("/music")} className="min-w-0 flex-1 text-left">
-            <span className="block truncate text-sm font-medium">{activeTrack ? titleOf(activeTrack.name) : "Vault Music"}</span>
-            <span className="block truncate text-xs text-muted-foreground">{activeTrack ? (playing ? "Now playing" : "Paused") : "Open your music library"}</span>
-          </button>
-          {activeTrack && (
-            <>
-              <span className="hidden text-xs tabular-nums text-muted-foreground sm:block">{clock(currentTime)} / {clock(duration)}</span>
-              <button type="button" aria-label="Previous track" onClick={previous} className="rounded-full p-2 hover:bg-accent"><SkipBack className="size-4" /></button>
-              <button type="button" aria-label={playing ? "Pause music" : "Play music"} disabled={loadingSource || !source} onClick={togglePlay} className="grid size-9 place-items-center rounded-full bg-primary text-primary-foreground disabled:opacity-40">{playing ? <Pause className="size-4" /> : <Play className="size-4" />}</button>
-              <button type="button" aria-label="Next track" onClick={next} className="rounded-full p-2 hover:bg-accent"><SkipForward className="size-4" /></button>
-            </>
-          )}
-          {!activeTrack && <Button size="sm" onClick={() => navigate("/music")}>Choose music</Button>}
+      <div className="fixed inset-x-3 bottom-3 z-50 sm:inset-x-6 sm:bottom-5">
+        <div className="relative mx-auto max-w-5xl overflow-hidden rounded-2xl border border-border/70 bg-background/80 shadow-[0_12px_48px_rgba(0,0,0,.22)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/65">
+          <div className="flex min-h-[76px] items-center gap-3 px-3 py-2.5 sm:gap-4 sm:px-5">
+            <button type="button" onClick={() => navigate("/music")} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+              <span className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-xl border border-border/60 bg-muted shadow-sm sm:size-12">
+                {activeTrack ? <PlayerArtwork track={activeTrack} /> : <AudioLines className="size-5 text-muted-foreground" />}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold leading-5">{activeTrack ? titleOf(activeTrack.name) : "Vault Music"}</span>
+                <span className="mt-0.5 block truncate text-xs text-muted-foreground">{activeTrack ? (loadingSource ? "Preparing audio…" : playing ? "Now playing" : "Paused") : "Choose a song to start listening"}</span>
+              </span>
+            </button>
+            <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+              <span className="hidden min-w-[76px] text-right font-mono text-[11px] tabular-nums text-muted-foreground md:block">{clock(currentTime)} / {clock(duration)}</span>
+              <button type="button" aria-label="Previous track" disabled={!activeTrack} onClick={previous} className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-35"><SkipBack className="size-4" /></button>
+              <button type="button" aria-label={playing ? "Pause music" : "Play music"} disabled={!activeTrack || loadingSource || !source} onClick={togglePlay} className="grid size-10 place-items-center rounded-full bg-primary text-primary-foreground shadow-sm transition hover:scale-105 disabled:opacity-40">{playing ? <Pause className="size-4" fill="currentColor" /> : <Play className="ml-0.5 size-4" fill="currentColor" />}</button>
+              <button type="button" aria-label="Next track" disabled={!activeTrack} onClick={next} className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-35"><SkipForward className="size-4" /></button>
+            </div>
+          </div>
+          <div className="h-1 w-full bg-foreground/[0.07]">
+            <div className="h-full bg-primary transition-[width] duration-200" style={{ width: `${duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0}%` }} />
+          </div>
         </div>
-        {activeTrack && duration > 0 && <div className="mx-auto mt-2 h-1 max-w-5xl overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary" style={{ width: `${Math.min(100, (currentTime / duration) * 100)}%` }} /></div>}
       </div>
       </>
     );
