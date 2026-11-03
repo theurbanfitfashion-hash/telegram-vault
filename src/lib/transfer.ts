@@ -137,12 +137,29 @@ export function useTransfer() {
         const slice = file.slice(start, Math.min(start + CHUNK_BYTES, file.size));
         onPatch({ phase: "uploading", chunkIndex: index }, workerIndex);
 
-        const uploadUrl = await getChunkUploadUrl({ fileId, index });
-        const storageId = await postSlice(uploadUrl, slice, (loaded) => {
-          onPatch({ phase: "uploading", chunkIndex: index }, workerIndex);
-          inFlightProgress.set(workerIndex, Math.min(loaded, slice.size));
-          reportProgress(workerIndex);
-        });
+        let storageId: Id<"_storage"> | null = null;
+        let lastError: unknown;
+        // Large uploads can lose an individual XHR while another worker is
+        // active. Retry this indexed part before failing the whole file.
+        for (let attempt = 0; attempt < 4; attempt++) {
+          try {
+            const uploadUrl = await getChunkUploadUrl({ fileId, index });
+            storageId = await postSlice(uploadUrl, slice, (loaded) => {
+              onPatch({ phase: "uploading", chunkIndex: index }, workerIndex);
+              inFlightProgress.set(workerIndex, Math.min(loaded, slice.size));
+              reportProgress(workerIndex);
+            });
+            break;
+          } catch (error) {
+            lastError = error;
+            const message = error instanceof Error ? error.message : "";
+            const permanent = /Storage rejected the upload \(4\d\d\)/.test(message);
+            if (permanent || attempt === 3) throw error;
+            inFlightProgress.set(workerIndex, 0);
+            await new Promise((resolve) => window.setTimeout(resolve, 1000 * 2 ** attempt));
+          }
+        }
+        if (!storageId) throw lastError instanceof Error ? lastError : new Error("Chunk upload failed.");
 
         onPatch({ phase: "storing", chunkIndex: index }, workerIndex);
         inFlightProgress.set(workerIndex, slice.size);
@@ -159,7 +176,13 @@ export function useTransfer() {
           await uploadPart(index, workerIndex);
         }
       };
-      await Promise.all(Array.from({ length: concurrency }, (_, workerIndex) => worker(workerIndex)));
+      const results = await Promise.allSettled(
+        Array.from({ length: concurrency }, (_, workerIndex) => worker(workerIndex)),
+      );
+      const failed = results.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      if (failed) throw failed.reason;
 
       await finishUpload({ fileId });
       for (let workerIndex = 0; workerIndex < concurrency; workerIndex++) {
