@@ -501,7 +501,9 @@ export function FileList({
               ) : null}
               {download && download.total > 0 ? (
                 <span className="ml-2 font-mono-nums text-xs text-muted-foreground">
-                  {download.done}/{download.total}
+                  {download.total > 0
+                    ? `${Math.round((download.done / download.total) * 100)}% · ${formatBytes(download.done)} / ${formatBytes(download.total)}`
+                    : "Starting browser download…"}
                 </span>
               ) : null}
             </button>
