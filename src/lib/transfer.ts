@@ -72,17 +72,6 @@ async function readErrorMessage(response: Response): Promise<string> {
   return text || `Request failed (${response.status}).`;
 }
 
-function triggerBrowserDownload(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
-
 /**
  * Everything that moves bytes: parts are uploaded one at a time (which keeps
  * Telegram's per-chat pacing happy) and downloads stream back part by part.
@@ -142,62 +131,65 @@ export function useTransfer() {
   }
 
   async function downloadFile(
-    file: Pick<Doc<"files">, "_id" | "name" | "mimeType" | "chunkCount">,
+    file: Pick<Doc<"files">, "_id" | "name" | "mimeType" | "chunkCount" | "size">,
     onProgress: (done: number, total: number) => void,
   ): Promise<void> {
-    if (file.chunkCount === 0) {
-      triggerBrowserDownload(
-        new Blob([], { type: file.mimeType || "application/octet-stream" }),
-        file.name,
-      );
-      onProgress(0, 0);
-      return;
-    }
-
     const token = await createDownloadToken({ fileId: file._id });
     const site = convexSiteUrl();
     if (!site) throw new Error("This deployment has no download endpoint.");
+    const downloadUrl = `${site}/file/${token}?download=1`;
     const partUrl = (index: number) => `${site}/file/${token}/${index}`;
 
-    // Prefer streaming straight to disk so large files never sit in memory.
+    // Stream to a user-selected file where supported. Report real byte progress.
     const picker = (window as unknown as SaveFilePicker).showSaveFilePicker;
     if (typeof picker === "function") {
+      let handle: Awaited<ReturnType<NonNullable<SaveFilePicker["showSaveFilePicker"]>>> | null = null;
       try {
-        const handle = await picker({ suggestedName: file.name });
-        const writable = await handle.createWritable();
-        for (let index = 0; index < file.chunkCount; index++) {
-          const response = await fetch(partUrl(index));
-          if (!response.ok || !response.body) {
-            throw new Error(await readErrorMessage(response));
-          }
-          const reader = response.body.getReader();
-          for (;;) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            await writable.write(value);
-          }
-          onProgress(index + 1, file.chunkCount);
-        }
-        await writable.close();
-        return;
+        handle = await picker({ suggestedName: file.name });
       } catch (error) {
-        // The user closing the save dialog is a real cancel; anything else
-        // falls back to assembling the file in the tab.
         if ((error as { name?: string })?.name === "AbortError") throw error;
+        // Browser refused the picker; use its native download manager instead.
+      }
+
+      if (handle) {
+        const writable = await handle.createWritable();
+        let loaded = 0;
+        onProgress(0, file.size);
+        try {
+          for (let index = 0; index < file.chunkCount; index++) {
+            const response = await fetch(partUrl(index));
+            if (!response.ok || !response.body) {
+              throw new Error(await readErrorMessage(response));
+            }
+            const reader = response.body.getReader();
+            for (;;) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              await writable.write(value);
+              loaded += value.byteLength;
+              onProgress(loaded, file.size);
+            }
+          }
+          await writable.close();
+          onProgress(file.size, file.size);
+          return;
+        } catch (error) {
+          await writable.abort?.().catch(() => {});
+          throw error;
+        }
       }
     }
 
-    const parts: Blob[] = [];
-    for (let index = 0; index < file.chunkCount; index++) {
-      const response = await fetch(partUrl(index));
-      if (!response.ok) throw new Error(await readErrorMessage(response));
-      parts.push(await response.blob());
-      onProgress(index + 1, file.chunkCount);
-    }
-    triggerBrowserDownload(
-      new Blob(parts, { type: file.mimeType || "application/octet-stream" }),
-      file.name,
-    );
+    // Mobile browsers (including Android Chrome variants) should own the
+    // transfer: no giant in-memory Blob, and the file appears in Downloads.
+    const anchor = document.createElement("a");
+    anchor.href = downloadUrl;
+    anchor.download = file.name;
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    onProgress(0, 0); // Native browser UI owns byte-level progress.
   }
 
   /** Removes a file from the vault and, best effort, from the Telegram chat. */
