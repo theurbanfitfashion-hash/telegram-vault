@@ -39,6 +39,7 @@ jobs:
             echo "::error::Add CONVEX_DEPLOY_KEY in GitHub repository Actions secrets."
             exit 1
           fi
+          npx @convex-dev/auth --skip-git-check --web-server-url https://telegram-vault-web.onrender.com
           npx convex env set SITE_URL https://telegram-vault-web.onrender.com
           npx convex dev --once
           npx convex codegen
