@@ -134,13 +134,12 @@ async function resolveBot(
   userId: Id<"users">,
 ): Promise<{
   token: string;
+  botId: string;
   username?: string;
   chatId?: string;
   chatTitle?: string;
 } | null> {
-  const config = await ctx.runQuery(internal.vault.getTelegramConfigDoc, {
-    userId,
-  });
+  const config = await ctx.runQuery(internal.vault.getTelegramConfigDoc, { userId });
   const candidates: { token: string; fromEnv: boolean }[] = [];
   const fromEnv = envToken();
   if (fromEnv) candidates.push({ token: fromEnv, fromEnv: true });
@@ -153,29 +152,22 @@ async function resolveBot(
     } catch {
       continue;
     }
-    const username = me.username ?? config?.botUsername;
-    if (!username) continue;
-
-    if (candidate.fromEnv && config?.botToken !== candidate.token) {
-      const botChanged = !!config?.botUsername && config.botUsername !== username;
-      await ctx.runMutation(internal.vault.saveTelegramConfig, {
-        userId,
-        botToken: candidate.token,
-        botUsername: username,
-        resetChat: false,
-      });
-      return {
-        token: candidate.token,
-        username,
-        chatId: botChanged ? undefined : config?.chatId,
-        chatTitle: botChanged ? undefined : config?.chatTitle,
-      };
-    }
+    if (!me.username) continue;
+    const botId = String(me.id);
+    await ctx.runMutation(internal.vault.saveTelegramConfig, {
+      userId,
+      botId,
+      botToken: candidate.token,
+      botUsername: me.username,
+      resetChat: false,
+    });
+    const shared = await ctx.runQuery(internal.vault.getTelegramBotDoc, { botId });
     return {
       token: candidate.token,
-      username,
-      chatId: config?.chatId,
-      chatTitle: config?.chatTitle,
+      botId,
+      username: me.username,
+      chatId: shared?.chatId ?? config?.chatId,
+      chatTitle: shared?.chatTitle ?? config?.chatTitle,
     };
   }
   return null;
@@ -186,17 +178,15 @@ async function requireConnection(
   ctx: ActionCtx,
   userId: Id<"users">,
 ): Promise<{ token: string; chatId: string }> {
-  const config = await ctx.runQuery(internal.vault.getTelegramConfigDoc, {
-    userId,
-  });
+  const config = await ctx.runQuery(internal.vault.getTelegramConfigDoc, { userId });
   const token = config?.botToken ?? envToken();
-  if (!token) {
-    throw new Error("Connect your Telegram bot before storing files.");
-  }
-  if (!config?.chatId) {
-    throw new Error("Finish connecting: press Start in your bot chat first.");
-  }
-  return { token, chatId: config.chatId };
+  if (!token) throw new Error("Connect your Telegram bot before storing files.");
+  const shared = config?.botId
+    ? await ctx.runQuery(internal.vault.getTelegramBotDoc, { botId: config.botId })
+    : null;
+  const chatId = shared?.chatId ?? config?.chatId;
+  if (!chatId) throw new Error("Finish connecting: the bot owner must press Start once in the bot chat.");
+  return { token: shared?.botToken ?? token, chatId };
 }
 
 function partName(name: string, index: number, chunkCount: number): string {
@@ -288,6 +278,7 @@ export const connectBot = action({
     }
     await ctx.runMutation(internal.vault.saveTelegramConfig, {
       userId,
+      botId: String(me.id),
       botToken: token,
       botUsername: me.username,
       resetChat: false,
@@ -331,7 +322,7 @@ export const detectChat = action({
       chat.title ||
       "Telegram";
     await ctx.runMutation(internal.vault.saveChat, {
-      userId,
+      botId: bot.botId,
       chatId: String(chat.id),
       chatTitle,
     });

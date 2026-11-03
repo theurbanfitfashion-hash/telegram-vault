@@ -66,8 +66,8 @@ function Step({
 }
 
 /**
- * The whole onboarding surface for version 1: paste a bot token, press Start
- * in Telegram, and the vault has somewhere to put things.
+ * Connect a bot once. Its Telegram destination is shared by all accounts
+ * that connect the same bot, so other devices never need to press Start.
  */
 export function ConnectPanel({
   status,
@@ -252,9 +252,10 @@ export function ConnectPanel({
               ) : (
                 <div className="-mt-1 space-y-3">
                   <p className="text-sm leading-6 text-muted-foreground">
-                    Open your bot in Telegram and press{" "}
-                    <span className="font-medium text-foreground">Start</span>.
-                    That's all it needs to know where your files live.
+                    The bot owner must open this bot in Telegram and press{" "}
+                    <span className="font-medium text-foreground">Start</span> once.
+                    After that, every account using this bot can use the same storage
+                    destination without opening Telegram again.
                   </p>
                   <div className="flex flex-wrap gap-2">
                     <Button
@@ -304,7 +305,7 @@ export function ConnectPanel({
             <p className="text-xs text-muted-foreground">
               {connected
                 ? "You can come back here any time to change bots."
-                : "Every account gets its own bot and its own storage."}
+                : "One bot destination can be reused across your devices and accounts."}
             </p>
             <div className="flex gap-2">
               {connected && onBack ? (
