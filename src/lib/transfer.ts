@@ -105,20 +105,45 @@ export function useTransfer() {
 
     let confirmed = 0;
     try {
-      for (let index = 0; index < chunkCount; index++) {
+      // Upload the next part to temporary Convex storage while the previous
+      // part is being forwarded to Telegram. Telegram sends remain sequential
+      // to respect per-chat rate limits and preserve the ordered parts list.
+      const prepareChunk = async (index: number) => {
         const start = index * CHUNK_BYTES;
         const slice = file.slice(start, Math.min(start + CHUNK_BYTES, file.size));
-        onPatch({ phase: "uploading", chunkIndex: index, loaded: confirmed });
+        const baseLoaded = start;
+        onPatch({ phase: "uploading", chunkIndex: index, loaded: baseLoaded });
 
         const uploadUrl = await getChunkUploadUrl({ fileId, index });
         const storageId = await postSlice(uploadUrl, slice, (loaded) =>
-          onPatch({ loaded: confirmed + Math.min(loaded, slice.size) }),
+          onPatch({ phase: "uploading", chunkIndex: index, loaded: baseLoaded + Math.min(loaded, slice.size) }),
         );
+        return { index, slice, storageId };
+      };
 
-        onPatch({ phase: "storing", chunkIndex: index, loaded: confirmed });
-        await sendChunk({ fileId, index, storageId });
-        confirmed += slice.size;
+      let current = chunkCount > 0 ? await prepareChunk(0) : null;
+      while (current) {
+        // Keep at most one additional 18 MiB part in flight. This overlaps
+        // client-to-Convex transfer with the server-to-Telegram transfer
+        // without creating an unbounded queue on mobile connections.
+        const next = current.index + 1 < chunkCount
+          ? prepareChunk(current.index + 1)
+          : null;
+
+        onPatch({
+          phase: "storing",
+          chunkIndex: current.index,
+          loaded: current.index * CHUNK_BYTES + current.slice.size,
+        });
+        await sendChunk({
+          fileId,
+          index: current.index,
+          storageId: current.storageId,
+        });
+        confirmed += current.slice.size;
         onPatch({ loaded: confirmed });
+
+        current = next ? await next : null;
       }
 
       await finishUpload({ fileId });
