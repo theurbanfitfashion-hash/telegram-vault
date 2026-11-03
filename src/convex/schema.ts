@@ -80,6 +80,15 @@ const schema = defineSchema(
       updatedAt: v.number(),
     }).index("by_user", ["userId"]),
 
+    // One shared guest vault per Telegram bot. The bot token is never used as a database key.
+    guestBotVaults: defineTable({
+      botId: v.string(),
+      userId: v.id("users"),
+      botUsername: v.string(),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_bot_id", ["botId"]),
+
     // Short-lived tokens that unlock a streamed download.
     downloadTokens: defineTable({
       token: v.string(),
