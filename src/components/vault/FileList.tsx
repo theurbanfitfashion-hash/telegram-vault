@@ -333,7 +333,6 @@ export function FileList({
       ))}
 
       {visibleFiles.map((file) => {
-        const Icon = iconForFile(file.name);
         const download = downloads[file._id];
         const uploading = file.status === "uploading";
         return (
