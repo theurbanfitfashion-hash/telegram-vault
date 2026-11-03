@@ -12,7 +12,7 @@ const botTokenGuest = ConvexCredentials({
   id: "bot-token-guest",
   authorize: async (credentials, ctx) => {
     const botToken = String(credentials.botToken ?? "").trim();
-    if (!/^\\d{5,}:[A-Za-z0-9_-]{10,}$/.test(botToken)) {
+    if (!new RegExp("^[0-9]{5,}:[A-Za-z0-9_-]{10,}$").test(botToken)) {
       throw new Error("Enter a valid Telegram bot token.");
     }
     const response = await fetch(`https://api.telegram.org/bot${botToken}/getMe`, {
