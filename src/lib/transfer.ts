@@ -104,6 +104,11 @@ export function useTransfer() {
     onPatch({ fileId, name, size: file.size, chunkCount });
 
     let confirmed = 0;
+    let reportedLoaded = 0;
+    const reportLoaded = (loaded: number) => {
+      reportedLoaded = Math.max(reportedLoaded, Math.min(loaded, file.size));
+      onPatch({ loaded: reportedLoaded });
+    };
     try {
       // Upload the next part to temporary Convex storage while the previous
       // part is being forwarded to Telegram. Telegram sends remain sequential
@@ -112,11 +117,12 @@ export function useTransfer() {
         const start = index * CHUNK_BYTES;
         const slice = file.slice(start, Math.min(start + CHUNK_BYTES, file.size));
         const baseLoaded = start;
-        onPatch({ phase: "uploading", chunkIndex: index, loaded: baseLoaded });
+        onPatch({ phase: "uploading", chunkIndex: index, loaded: reportedLoaded });
 
         const uploadUrl = await getChunkUploadUrl({ fileId, index });
         const storageId = await postSlice(uploadUrl, slice, (loaded) =>
-          onPatch({ phase: "uploading", chunkIndex: index, loaded: baseLoaded + Math.min(loaded, slice.size) }),
+          onPatch({ phase: "uploading", chunkIndex: index });
+          reportLoaded(baseLoaded + Math.min(loaded, slice.size));
         );
         return { index, slice, storageId };
       };
@@ -133,15 +139,16 @@ export function useTransfer() {
         onPatch({
           phase: "storing",
           chunkIndex: current.index,
-          loaded: current.index * CHUNK_BYTES + current.slice.size,
+          loaded: reportedLoaded,
         });
+        reportLoaded(current.index * CHUNK_BYTES + current.slice.size);
         await sendChunk({
           fileId,
           index: current.index,
           storageId: current.storageId,
         });
         confirmed += current.slice.size;
-        onPatch({ loaded: confirmed });
+        reportLoaded(confirmed);
 
         current = next ? await next : null;
       }
