@@ -16,7 +16,8 @@ auth.addHttpRoutes(http);
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, Range",
+  "Access-Control-Expose-Headers": "Accept-Ranges, Content-Length, Content-Range, Content-Disposition",
 };
 
 /** Types that can run code if opened as a document; they get a sandbox. */
@@ -68,23 +69,26 @@ async function openPart(
   botToken: string,
   telegramFileId: string,
 ): Promise<ReadableStream<Uint8Array>> {
-  const meta = (await fetch(
+  const metaResponse = await fetch(
     `https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(
       telegramFileId,
     )}`,
-  ).then((res) => res.json())) as {
-    ok: boolean;
+  );
+  const meta = (await metaResponse.json().catch(() => null)) as {
+    ok?: boolean;
     result?: { file_path?: string };
     description?: string;
-  };
-  if (!meta.ok || !meta.result?.file_path) {
-    throw new Error("Telegram could not produce this file.");
+  } | null;
+  if (!metaResponse.ok || !meta?.ok || !meta.result?.file_path) {
+    throw new Error(
+      meta?.description ?? `Telegram getFile failed (HTTP ${metaResponse.status}).`,
+    );
   }
   const upstream = await fetch(
     `https://api.telegram.org/file/bot${botToken}/${meta.result.file_path}`,
   );
   if (!upstream.ok || !upstream.body) {
-    throw new Error("Telegram could not serve this file.");
+    throw new Error(`Telegram file download failed (HTTP ${upstream.status}).`);
   }
   return upstream.body;
 }
@@ -181,8 +185,13 @@ function streamRange(
   start: number,
   end: number,
   size: number,
+  firstStream: ReadableStream<Uint8Array>,
 ): ReadableStream<Uint8Array> {
   const openers = new Map<number, Promise<ReadableStream<Uint8Array>>>();
+  // Open the first Telegram part before sending HTTP headers. This lets the
+  // route return a useful 502 response instead of a browser "Failed to fetch".
+  const firstIndex = Math.min(Math.floor(start / chunkBytes), partIds.length - 1);
+  openers.set(firstIndex, Promise.resolve(firstStream));
   const open = (index: number) => {
     let pending = openers.get(index);
     if (!pending) {
@@ -281,6 +290,21 @@ const downloadWhole = httpAction(async (ctx, request) => {
   headers["Content-Length"] = String(end - start + 1);
   if (range) headers["Content-Range"] = `bytes ${start}-${end}/${file.size}`;
 
+  // Resolve the first part before committing the response. Previously a
+  // Telegram error occurred inside the response stream after status 200 had
+  // already been sent, which browsers report only as "Failed to fetch".
+  const firstIndex = Math.min(
+    Math.floor(start / file.chunkBytes),
+    file.partIds.length - 1,
+  );
+  let firstStream: ReadableStream<Uint8Array>;
+  try {
+    firstStream = await openPart(file.botToken, file.partIds[firstIndex]);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Unknown Telegram error.";
+    return textResponse(502, detail);
+  }
+
   const stream = streamRange(
     file.partIds,
     file.chunkBytes,
@@ -288,6 +312,7 @@ const downloadWhole = httpAction(async (ctx, request) => {
     start,
     end,
     file.size,
+    firstStream,
   );
   return new Response(stream, { status: range ? 206 : 200, headers });
 });
