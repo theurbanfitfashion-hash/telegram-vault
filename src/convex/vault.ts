@@ -263,10 +263,19 @@ export const finishUpload = mutation({
     const userId = await requireUser(ctx);
     const file = await ctx.db.get(fileId);
     if (!file || file.userId !== userId) throw new Error("Upload not found.");
-    if (file.parts.length !== file.chunkCount) {
-      throw new Error("Some parts never arrived — try uploading again.");
-    }
-    await ctx.db.patch(fileId, { status: "ready" });
+    const partMap = file.partMap ?? {};
+    const orderedParts = Array.from({ length: file.chunkCount }, (_, index) => {
+      const part = partMap[String(index)];
+      if (!part) {
+        throw new Error(`Part ${index + 1} of ${file.chunkCount} never arrived — retry the upload.`);
+      }
+      return part;
+    });
+    await ctx.db.patch(fileId, {
+      parts: orderedParts,
+      partMap: undefined,
+      status: "ready",
+    });
   },
 });
 
@@ -605,12 +614,10 @@ export const recordPart = internalMutation({
   handler: async (ctx, { fileId, index, telegramFileId, messageId }) => {
     const file = await ctx.db.get(fileId);
     if (!file) return;
-    const parts = [...file.parts];
-    // Out-of-order parts would leave holes the schema rejects; leaving it
-    // unrecorded makes finishUpload report an incomplete upload instead.
-    if (index > parts.length) return;
-    parts[index] = { fileId: telegramFileId, messageId };
-    await ctx.db.patch(fileId, { parts });
+    if (file.status !== "uploading" || index < 0 || index >= file.chunkCount) return;
+    const partMap = { ...(file.partMap ?? {}) };
+    partMap[String(index)] = { fileId: telegramFileId, messageId };
+    await ctx.db.patch(fileId, { partMap });
   },
 });
 
