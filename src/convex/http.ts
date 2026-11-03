@@ -246,75 +246,80 @@ function streamRange(
  * byte window of a range request maps straight onto the parts it covers.
  */
 const downloadWhole = httpAction(async (ctx, request) => {
-  const { pathname } = new URL(request.url);
-  const [, route, token] = pathname.split("/");
-  if (route !== "file" || !token) return textResponse(404, "Not found");
-
-  const file = await ctx.runQuery(internal.vault.resolveWholeFile, { token });
-  if (!file) return textResponse(410, "This download link has expired.");
-
-  const contentType = mimeForFile(file.fileName, file.mimeType);
-  const headers: Record<string, string> = {
-    ...CORS_HEADERS,
-    "Content-Type": contentType,
-    "Content-Disposition": inlineDisposition(file.fileName),
-    "Accept-Ranges": "bytes",
-    "Cache-Control": "private, max-age=600",
-    "X-Content-Type-Options": "nosniff",
-  };
-  if (ACTIVE_TYPES.has(contentType)) {
-    // HTML/SVG/XML opened as a document stay inert — no scripts, no forms.
-    headers["Content-Security-Policy"] = "sandbox";
-  }
-
-  if (file.size === 0 || file.partIds.length === 0) {
-    headers["Content-Length"] = "0";
-    return new Response(null, { status: 200, headers });
-  }
-
-  const range = parseRangeHeader(request.headers.get("Range"), file.size);
-  if (range === "unsatisfiable") {
-    return new Response("Requested range not satisfiable.", {
-      status: 416,
-      headers: {
-        ...CORS_HEADERS,
-        "Content-Type": "text/plain; charset=utf-8",
-        "Content-Range": `bytes */${file.size}`,
-        "Cache-Control": "no-store",
-      },
-    });
-  }
-
-  const start = range ? range.start : 0;
-  const end = range ? range.end : file.size - 1;
-  headers["Content-Length"] = String(end - start + 1);
-  if (range) headers["Content-Range"] = `bytes ${start}-${end}/${file.size}`;
-
-  // Resolve the first part before committing the response. Previously a
-  // Telegram error occurred inside the response stream after status 200 had
-  // already been sent, which browsers report only as "Failed to fetch".
-  const firstIndex = Math.min(
-    Math.floor(start / file.chunkBytes),
-    file.partIds.length - 1,
-  );
-  let firstStream: ReadableStream<Uint8Array>;
   try {
-    firstStream = await openPart(file.botToken, file.partIds[firstIndex]);
+    const { pathname } = new URL(request.url);
+    const [, route, token] = pathname.split("/");
+    if (route !== "file" || !token) return textResponse(404, "Not found");
+  
+    const file = await ctx.runQuery(internal.vault.resolveWholeFile, { token });
+    if (!file) return textResponse(410, "This download link has expired.");
+  
+    const contentType = mimeForFile(file.fileName, file.mimeType);
+    const headers: Record<string, string> = {
+      ...CORS_HEADERS,
+      "Content-Type": contentType,
+      "Content-Disposition": inlineDisposition(file.fileName),
+      "Accept-Ranges": "bytes",
+      "Cache-Control": "private, max-age=600",
+      "X-Content-Type-Options": "nosniff",
+    };
+    if (ACTIVE_TYPES.has(contentType)) {
+      // HTML/SVG/XML opened as a document stay inert — no scripts, no forms.
+      headers["Content-Security-Policy"] = "sandbox";
+    }
+  
+    if (file.size === 0 || file.partIds.length === 0) {
+      headers["Content-Length"] = "0";
+      return new Response(null, { status: 200, headers });
+    }
+  
+    const range = parseRangeHeader(request.headers.get("Range"), file.size);
+    if (range === "unsatisfiable") {
+      return new Response("Requested range not satisfiable.", {
+        status: 416,
+        headers: {
+          ...CORS_HEADERS,
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Range": `bytes */${file.size}`,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+  
+    const start = range ? range.start : 0;
+    const end = range ? range.end : file.size - 1;
+    headers["Content-Length"] = String(end - start + 1);
+    if (range) headers["Content-Range"] = `bytes ${start}-${end}/${file.size}`;
+  
+    // Resolve the first part before committing the response. Previously a
+    // Telegram error occurred inside the response stream after status 200 had
+    // already been sent, which browsers report only as "Failed to fetch".
+    const firstIndex = Math.min(
+      Math.floor(start / file.chunkBytes),
+      file.partIds.length - 1,
+    );
+    let firstStream: ReadableStream<Uint8Array>;
+    try {
+      firstStream = await openPart(file.botToken, file.partIds[firstIndex]);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Unknown Telegram error.";
+      return textResponse(502, detail);
+    }
+  
+    const stream = streamRange(
+      file.partIds,
+      file.chunkBytes,
+      file.botToken,
+      start,
+      end,
+      file.size,
+      firstStream,
+    );
+    return new Response(stream, { status: range ? 206 : 200, headers });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "Unknown Telegram error.";
-    return textResponse(502, detail);
+    const detail = error instanceof Error ? error.message : "Unexpected file server error.";
+    return textResponse(500, detail);
   }
-
-  const stream = streamRange(
-    file.partIds,
-    file.chunkBytes,
-    file.botToken,
-    start,
-    end,
-    file.size,
-    firstStream,
-  );
-  return new Response(stream, { status: range ? 206 : 200, headers });
 });
 
 /**
