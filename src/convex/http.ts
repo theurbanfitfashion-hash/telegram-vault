@@ -381,14 +381,9 @@ const corsPreflight = httpAction(async () => {
 http.route({ path: "/health", method: "GET", handler: healthCheck });
 http.route({ path: "/health", method: "OPTIONS", handler: corsPreflight });
 
-http.route({ path: "/file/:token", method: "GET", handler: downloadWhole });
-http.route({ path: "/file/:token", method: "OPTIONS", handler: corsPreflight });
-
-http.route({ path: "/file/:token/:index", method: "GET", handler: downloadPart });
-http.route({
-  path: "/file/:token/:index",
-  method: "OPTIONS",
-  handler: corsPreflight,
-});
+// Convex supports exact paths and path prefixes, not Express-style ":param"
+// segments. Match /file/ and parse token/index in the handlers above.
+http.route({ pathPrefix: "/file/", method: "GET", handler: downloadWhole });
+http.route({ pathPrefix: "/file/", method: "OPTIONS", handler: corsPreflight });
 
 export default http;
