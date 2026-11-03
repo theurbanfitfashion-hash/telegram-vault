@@ -89,12 +89,13 @@ createRoot(document.getElementById("root")!).render(
                 path="/music"
                 element={
                   <RequireAuth title="Sign in to listen to your music" description="Your personal music library is private to your vault.">
-                    <Music />
+                    <div className="min-h-dvh bg-[#090d13]" />
                   </RequireAuth>
                 }
               />
               <Route path="*" element={<NotFound />} />
             </Routes>
+            <Music />
           </Suspense>
         </BrowserRouter>
         <Toaster />

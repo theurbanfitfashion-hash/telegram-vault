@@ -10,7 +10,8 @@ import {
   Repeat, Repeat1, SkipBack, SkipForward, Shuffle, Volume2, VolumeX, ListPlus, Plus, X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
+import { useAuth } from "@/hooks/use-auth";
 
 type SavedPlaylist = { id: string; name: string; trackIds: string[] };
 
@@ -35,7 +36,11 @@ function clock(value: number) {
 
 export default function Music() {
   const navigate = useNavigate();
-  const files = useQuery(api.vault.listAllFiles, {});
+  const location = useLocation();
+  const { isAuthenticated } = useAuth();
+  const isPlayerPage = location.pathname === "/music";
+  const isDashboard = location.pathname === "/dashboard";
+  const files = useQuery(api.vault.listAllFiles, isAuthenticated && (isPlayerPage || isDashboard) ? {} : "skip");
   const createToken = useMutation(api.vault.createDownloadToken);
   const tracks = useMemo(() => (files ?? []).filter((file) => file.status === "ready" && isAudio(file)), [files]);
   const [activeId, setActiveId] = useState<Id<"files"> | null>(null);
@@ -60,7 +65,7 @@ export default function Music() {
   const visibleTracks = selectedPlaylistId === "all"
     ? tracks
     : tracks.filter((track) => playlists.find((list) => list.id === selectedPlaylistId)?.trackIds.includes(track._id));
-  const activeTrack = tracks.find((track) => track._id === activeId) ?? tracks[0] ?? null;
+  const activeTrack = tracks.find((track) => track._id === activeId) ?? null;
 
   useEffect(() => {
     localStorage.setItem("telegram-vault:music-playlists:v1", JSON.stringify(playlists));
@@ -85,13 +90,14 @@ export default function Music() {
   };
 
   useEffect(() => {
-    if (!activeId && tracks.length) setActiveId(tracks[0]._id);
-    if (activeId && !tracks.some((track) => track._id === activeId)) setActiveId(tracks[0]?._id ?? null);
-  }, [tracks, activeId]);
+    if (activeId && files !== undefined && !tracks.some((track) => track._id === activeId)) {
+      setActiveId(null);
+    }
+  }, [tracks, activeId, files]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!activeTrack) { setSource(null); return; }
+    if (!activeTrack) { setSource(null); setLoadingSource(false); return; }
     setLoadingSource(true);
     setSource(null);
     setPlaying(false);
@@ -166,9 +172,41 @@ export default function Music() {
     else { audio.pause(); setPlaying(false); }
   };
 
-  if (files === undefined) return <main className="grid min-h-dvh place-items-center bg-[#090d13] text-white"><Loader2 className="size-6 animate-spin text-cyan-300" /></main>;
+  const audioElement = <audio className="hidden" ref={audioRef} src={source ?? undefined} preload="none" onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)} onCanPlay={() => { if (autoplayAfterLoad.current && audioRef.current) { autoplayAfterLoad.current = false; void audioRef.current.play().then(() => { setPlaybackError(null); setPlaying(true); }).catch((error: unknown) => { console.error("Automatic playback failed", error); setPlaybackError("Tap Play to start this track. Your browser blocked automatic playback."); setPlaying(false); }); } }} onEnded={() => { if (repeat === "one" && audioRef.current) { audioRef.current.currentTime = 0; void audioRef.current.play(); } else next(); }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => { if (source) { setPlaying(false); setPlaybackError("The audio stream could not be loaded. Check the file format or try downloading it."); } }} />;
+
+  if (!isAuthenticated || (!isPlayerPage && !isDashboard)) return null;
+
+  if (isDashboard) {
+    return (
+      <>
+      {audioElement}
+      <div className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/95 px-3 py-2 shadow-[0_-8px_30px_rgba(0,0,0,.12)] backdrop-blur">
+        <div className="mx-auto flex max-w-5xl items-center gap-3">
+          <button type="button" onClick={() => navigate("/music")} className="min-w-0 flex-1 text-left">
+            <span className="block truncate text-sm font-medium">{activeTrack ? titleOf(activeTrack.name) : "Vault Music"}</span>
+            <span className="block truncate text-xs text-muted-foreground">{activeTrack ? (playing ? "Now playing" : "Paused") : "Open your music library"}</span>
+          </button>
+          {activeTrack && (
+            <>
+              <span className="hidden text-xs tabular-nums text-muted-foreground sm:block">{clock(currentTime)} / {clock(duration)}</span>
+              <button type="button" aria-label="Previous track" onClick={previous} className="rounded-full p-2 hover:bg-accent"><SkipBack className="size-4" /></button>
+              <button type="button" aria-label={playing ? "Pause music" : "Play music"} disabled={loadingSource || !source} onClick={togglePlay} className="grid size-9 place-items-center rounded-full bg-primary text-primary-foreground disabled:opacity-40">{playing ? <Pause className="size-4" /> : <Play className="size-4" />}</button>
+              <button type="button" aria-label="Next track" onClick={next} className="rounded-full p-2 hover:bg-accent"><SkipForward className="size-4" /></button>
+            </>
+          )}
+          {!activeTrack && <Button size="sm" onClick={() => navigate("/music")}>Choose music</Button>}
+        </div>
+        {activeTrack && duration > 0 && <div className="mx-auto mt-2 h-1 max-w-5xl overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary" style={{ width: `${Math.min(100, (currentTime / duration) * 100)}%` }} /></div>}
+      </div>
+      </>
+    );
+  }
+
+  if (files === undefined) return <>{audioElement}<main className="grid min-h-dvh place-items-center bg-[#090d13] text-white"><Loader2 className="size-6 animate-spin text-cyan-300" /></main></>;
 
   return (
+    <>
+    {audioElement}
     <main className="min-h-dvh overflow-hidden bg-[#090d13] text-white">
       <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col px-4 pb-8 pt-5 sm:px-8">
         <header className="flex items-center justify-between">
@@ -216,7 +254,7 @@ export default function Music() {
               </div>
             </div>
             {loadingSource ? <p className="mt-4 text-center text-xs text-white/40">Preparing audio stream…</p> : playbackError ? <p role="alert" className="mt-4 text-center text-xs text-rose-300">{playbackError}</p> : activeTrack && !source ? <p className="mt-4 text-center text-xs text-white/40">Audio link is not ready yet.</p> : null}
-            <audio ref={audioRef} src={source ?? undefined} preload="metadata" onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)} onCanPlay={() => { if (autoplayAfterLoad.current && audioRef.current) { autoplayAfterLoad.current = false; void audioRef.current.play().then(() => { setPlaybackError(null); setPlaying(true); }).catch((error: unknown) => { console.error("Automatic playback failed", error); setPlaybackError("Tap Play to start this track. Your browser blocked automatic playback."); setPlaying(false); }); } }} onEnded={() => { if (repeat === "one" && audioRef.current) { audioRef.current.currentTime = 0; void audioRef.current.play(); } else next(); }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => { if (source) { setPlaying(false); setPlaybackError("The audio stream could not be loaded. Check the file format or try downloading it."); } }} />
+
           </div>
 
           <aside className="mx-auto w-full max-w-xl overflow-hidden rounded-3xl border border-white/10 bg-white/[0.035]">
@@ -268,5 +306,6 @@ export default function Music() {
         <footer className="text-center text-[11px] tracking-wide text-white/25">PRIVATE AUDIO LIBRARY · STORED IN YOUR TELEGRAM CHAT</footer>
       </div>
     </main>
+    </>
   );
 }

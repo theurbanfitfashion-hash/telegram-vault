@@ -342,7 +342,7 @@ export default function Dashboard() {
   );
 
   return (
-    <div className="flex h-dvh overflow-hidden bg-background text-foreground">
+    <div className="flex h-dvh overflow-hidden bg-background pb-16 text-foreground">
       <Sheet>
         <aside className="hidden w-[264px] shrink-0 border-r border-sidebar-border bg-sidebar lg:block">
           {sidebar}
@@ -410,7 +410,7 @@ export default function Dashboard() {
               <FolderPlus className="mr-2 size-4" />
               <span className="hidden sm:inline">New folder</span>
             </Button>
-            <Button size="sm" variant="outline" onClick={() => { const player = window.open(`${window.location.origin}/music`, "telegram-vault-music", "popup=yes,width=460,height=820,resizable=yes,scrollbars=yes"); if (!player) navigate("/music"); else player.focus(); }}>
+            <Button size="sm" variant="outline" onClick={() => navigate("/music")}>
               <Headphones className="mr-2 size-4" />
               <span className="hidden sm:inline">Music</span>
             </Button>

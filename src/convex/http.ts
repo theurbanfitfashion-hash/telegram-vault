@@ -70,31 +70,48 @@ function attachmentDisposition(fileName: string): string {
 }
 
 /**
- * Resolves one part's Telegram handle and opens its byte stream. `file_path`
- * is only guaranteed fresh for an hour, so ask for it on every use.
+ * Telegram file paths are valid for at least an hour. Cache them briefly in
+ * the action isolate so repeat range requests (metadata, playback, seeking)
+ * don't pay an extra getFile round trip each time.
  */
+const telegramPathCache = new Map<string, { url: string; expiresAt: number }>();
+
 async function openPart(
   botToken: string,
   telegramFileId: string,
 ): Promise<ReadableStream<Uint8Array>> {
-  const metaResponse = await fetch(
-    `https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(
-      telegramFileId,
-    )}`,
-  );
-  const meta = (await metaResponse.json().catch(() => null)) as {
-    ok?: boolean;
-    result?: { file_path?: string };
-    description?: string;
-  } | null;
-  if (!metaResponse.ok || !meta?.ok || !meta.result?.file_path) {
-    throw new Error(
-      meta?.description ?? `Telegram getFile failed (HTTP ${metaResponse.status}).`,
+  const cacheKey = `${botToken}:${telegramFileId}`;
+  const cached = telegramPathCache.get(cacheKey);
+  let fileUrl = cached && cached.expiresAt > Date.now() ? cached.url : null;
+
+  const resolveUrl = async () => {
+    const metaResponse = await fetch(
+      `https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(telegramFileId)}`,
     );
+    const meta = (await metaResponse.json().catch(() => null)) as {
+      ok?: boolean;
+      result?: { file_path?: string };
+      description?: string;
+    } | null;
+    if (!metaResponse.ok || !meta?.ok || !meta.result?.file_path) {
+      throw new Error(meta?.description ?? `Telegram getFile failed (HTTP ${metaResponse.status}).`);
+    }
+    const resolved = `https://api.telegram.org/file/bot${botToken}/${meta.result.file_path}`;
+    if (telegramPathCache.size > 500) {
+      const oldestKey = telegramPathCache.keys().next().value;
+      if (oldestKey) telegramPathCache.delete(oldestKey);
+    }
+    telegramPathCache.set(cacheKey, { url: resolved, expiresAt: Date.now() + 50 * 60 * 1000 });
+    return resolved;
+  };
+
+  if (!fileUrl) fileUrl = await resolveUrl();
+  let upstream = await fetch(fileUrl);
+  if (upstream.status === 401 || upstream.status === 404) {
+    telegramPathCache.delete(cacheKey);
+    fileUrl = await resolveUrl();
+    upstream = await fetch(fileUrl);
   }
-  const upstream = await fetch(
-    `https://api.telegram.org/file/bot${botToken}/${meta.result.file_path}`,
-  );
   if (!upstream.ok || !upstream.body) {
     throw new Error(`Telegram file download failed (HTTP ${upstream.status}).`);
   }
