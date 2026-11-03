@@ -206,7 +206,7 @@ export function FileList({
   }
 
   return (
-    <div className={viewMode === "grid" ? "grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" : "divide-y divide-border/60"}>
+    <div className="divide-y divide-border/60">
       <div className="flex flex-col gap-2 border-b border-border/60 p-3 sm:flex-row">
         <label className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -266,6 +266,7 @@ export function FileList({
       {visibleFolders.length === 0 && visibleFiles.length === 0 ? (
         <div className="px-6 py-14 text-center text-sm text-muted-foreground">No matching files or folders.</div>
       ) : null}
+      <div className={cn(viewMode === "grid" ? "grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" : "divide-y divide-border/60")}>
       <div className={cn("items-center gap-3 bg-muted/50 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground sm:flex", viewMode === "grid" && "hidden")}>
         <span className="flex-1">Name</span>
         <span className="w-24 shrink-0 text-right">Size</span>
@@ -340,16 +341,11 @@ export function FileList({
             key={file._id}
             className={cn("group flex items-center gap-3 transition-colors hover:bg-accent/70", viewMode === "grid" ? "min-w-0 flex-col items-stretch rounded-xl border border-border/70 bg-card p-3" : "px-4 py-2.5")}
           >
-            <span
-              className={cn(
-                "grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground",
-                uploading && "text-[var(--brand)]",
-              )}
-            >
+            <span className={cn("relative", viewMode === "grid" ? "w-full" : "shrink-0")}>
               {download ? (
-                <Loader2 className="size-4 animate-spin" />
+                <span className={cn("grid place-items-center rounded-lg bg-muted", viewMode === "grid" ? "h-28 w-full" : "size-10")}><Loader2 className="size-4 animate-spin" /></span>
               ) : (
-                <Icon className="size-4" />
+                <FileThumbnail file={file} className={viewMode === "grid" ? "h-28 w-full" : "size-10"} />
               )}
             </span>
             <button
@@ -428,6 +424,7 @@ export function FileList({
           </div>
         );
       })}
+      </div>
     </div>
   );
 }
