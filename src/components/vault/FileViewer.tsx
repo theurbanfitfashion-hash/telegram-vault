@@ -207,7 +207,28 @@ function ViewerSurface({
                 ready ? "opacity-100" : "opacity-0",
               )}
               onLoad={() => setReady(true)}
-              onError={() => setBodyError("This image couldn't be loaded.")}
+              onError={async () => {
+                // An <img> error hides the HTTP status and response body.
+                // Probe the same URL so the viewer can show the server error.
+                try {
+                  const response = await fetch(source);
+                  if (!response.ok) {
+                    const detail = await response.text().catch(() => "");
+                    setBodyError(
+                      "File server returned HTTP " + response.status +
+                      (detail ? ": " + detail : "."),
+                    );
+                    return;
+                  }
+                  setBodyError("The server returned the file, but the browser could not decode it as an image.");
+                } catch (error) {
+                  setBodyError(
+                    error instanceof Error
+                      ? "Network/CORS error while requesting the file: " + error.message
+                      : "Network/CORS error while requesting the file.",
+                  );
+                }
+              }}
             />
             {!ready ? (
               <div className="absolute inset-0 grid place-items-center">
