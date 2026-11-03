@@ -390,7 +390,7 @@ export const sendChunk = action({
         message.animation?.file_id ??
         message.voice?.file_id ??
         message.video_note?.file_id ??
-        message.photo?.at(-1)?.file_id;
+        message.photo?.[message.photo.length - 1]?.file_id;
       if (!telegramFileId) {
         const returnedFields = Object.keys(message).filter(
           (key) => !["chat", "from", "sender_chat"].includes(key),
