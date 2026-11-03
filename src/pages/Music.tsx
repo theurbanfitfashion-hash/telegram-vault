@@ -240,7 +240,7 @@ export default function Music() {
     {audioElement}
     <main className="min-h-dvh bg-[#090d13] text-white">
       <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col px-4 pb-4 pt-0 sm:px-8">
-        <section className="grid flex-1 grid-cols-1 items-start gap-4 pt-0 pb-2 sm:gap-6 md:grid-cols-[minmax(0,1.15fr)_minmax(0,.85fr)]">
+        <section className="grid flex-1 grid-cols-1 items-start gap-4 pt-3 pb-2 sm:gap-6 sm:pt-4 md:grid-cols-[minmax(0,1.15fr)_minmax(0,.85fr)]">
           <div className="mx-auto w-full max-w-xl">
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="relative mx-auto mb-5 aspect-square w-full max-w-[340px] overflow-hidden rounded-[2rem] border border-white/10 bg-gradient-to-br from-[#17334a] via-[#132231] to-[#281b3b] p-5" style={{ maxWidth: "min(340px, 32dvh)" }}>
               <div className="absolute inset-0 opacity-40" style={{ backgroundImage: "radial-gradient(circle at 25% 20%, #41d9d0 0, transparent 34%), radial-gradient(circle at 80% 80%, #a855f7 0, transparent 38%)" }} />
