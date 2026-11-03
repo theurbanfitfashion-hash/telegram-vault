@@ -363,9 +363,23 @@ const downloadPart = httpAction(async (ctx, request) => {
   });
 });
 
+const healthCheck = httpAction(async () => {
+  return new Response("telegram-vault-file-endpoint-ok", {
+    status: 200,
+    headers: {
+      ...CORS_HEADERS,
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
+});
+
 const corsPreflight = httpAction(async () => {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 });
+
+http.route({ path: "/health", method: "GET", handler: healthCheck });
+http.route({ path: "/health", method: "OPTIONS", handler: corsPreflight });
 
 http.route({ path: "/file/:token", method: "GET", handler: downloadWhole });
 http.route({ path: "/file/:token", method: "OPTIONS", handler: corsPreflight });
