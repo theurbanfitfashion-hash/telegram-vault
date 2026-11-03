@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/input-otp";
 
 import { useAuth } from "@/hooks/use-auth";
-import logo from "@/assets/logo.svg";
+import logo from "@/assets/logo.svg";\nimport { AccountUpgrade } from "@/components/AccountUpgrade";
 import { ArrowRight, Loader2, LogOut, Mail, UserX } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
@@ -190,7 +190,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   into the vault, or sign out to use a different account.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="flex flex-col gap-2 pb-6">
+              <CardContent className="flex flex-col gap-3 pb-6">\n                {user?.isAnonymous && <AccountUpgrade />}
                 <Button className="w-full" onClick={() => navigate(redirect)}>
                   Continue to the vault
                   <ArrowRight className="ml-2 h-4 w-4" />
