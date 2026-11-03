@@ -93,12 +93,16 @@ function synchsafeSize(bytes: Uint8Array, offset: number) {
 function extractMp3Artwork(buffer: ArrayBuffer): Blob | null {
   const bytes = new Uint8Array(buffer);
   if (bytes.length < 10 || String.fromCharCode(...bytes.slice(0, 3)) !== "ID3") return null;
+  const version = bytes[3];
   const tagEnd = Math.min(bytes.length, 10 + synchsafeSize(bytes, 6));
+  const frameSizeAt = (at: number) => version === 3
+    ? (bytes[at] * 0x1000000 + bytes[at + 1] * 0x10000 + bytes[at + 2] * 0x100 + bytes[at + 3])
+    : synchsafeSize(bytes, at);
   let offset = 10;
   while (offset + 10 <= tagEnd) {
     const frameId = String.fromCharCode(...bytes.slice(offset, offset + 4));
     if (!/^[A-Z0-9]{4}$/.test(frameId)) break;
-    const frameSize = synchsafeSize(bytes, offset + 4);
+    const frameSize = frameSizeAt(offset + 4);
     if (frameSize <= 0 || offset + 10 + frameSize > tagEnd) break;
     if (frameId === "APIC") {
       const frame = bytes.slice(offset + 10, offset + 10 + frameSize);
