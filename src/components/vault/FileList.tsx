@@ -11,7 +11,10 @@ import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { errorMessage } from "@/lib/errors";
 import { formatBytes, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { useMemo, useState } from "react";
+import { api } from "@/convex/_generated/api";
+import { convexSiteUrl } from "@/lib/convex-site";
+import { useMutation } from "convex/react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -34,6 +37,8 @@ import {
   Search,
   Trash2,
   Upload,
+  Grid2X2,
+  List,
 } from "lucide-react";
 
 /** A file as the list sees it — its Telegram parts never leave the server. */
@@ -65,6 +70,39 @@ function iconForFile(name: string) {
     return FileText;
   }
   return FileIcon;
+}
+
+function isImageFile(file: ListedFile) {
+  const ext = fileExtension(file.name);
+  return file.mimeType.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp", "svg", "heic", "avif", "bmp"].includes(ext);
+}
+
+function FileThumbnail({ file, className }: { file: ListedFile; className?: string }) {
+  const createDownloadToken = useMutation(api.vault.createDownloadToken);
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const image = isImageFile(file);
+  const Icon = iconForFile(file.name);
+
+  useEffect(() => {
+    if (!image || file.status !== "ready") return;
+    let cancelled = false;
+    createDownloadToken({ fileId: file._id })
+      .then((token) => {
+        const site = convexSiteUrl();
+        if (site && !cancelled) setSrc(`${site}/file/${token}`);
+      })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; };
+  }, [createDownloadToken, file._id, file.status, image]);
+
+  return (
+    <span className={cn("grid shrink-0 place-items-center overflow-hidden rounded-lg bg-muted text-muted-foreground", className)}>
+      {image && src && !failed ? (
+        <img src={src} alt={file.name} loading="lazy" className="h-full w-full object-cover" onError={() => setFailed(true)} />
+      ) : <Icon className="size-5" />}
+    </span>
+  );
 }
 
 const ROW_ACTIONS =
@@ -104,6 +142,7 @@ export function FileList({
   const [search, setSearch] = useState("");
   const [sortField, setSortField] = useState<"date" | "size" | "name" | "type">("date");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const sortLabel = {
     date: "Date modified",
     size: "Size",
@@ -167,7 +206,7 @@ export function FileList({
   }
 
   return (
-    <div className="divide-y divide-border/60">
+    <div className={viewMode === "grid" ? "grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" : "divide-y divide-border/60"}>
       <div className="flex flex-col gap-2 border-b border-border/60 p-3 sm:flex-row">
         <label className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -219,11 +258,15 @@ export function FileList({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <div className="flex h-10 shrink-0 items-center rounded-lg border border-input p-1" role="group" aria-label="File view">
+          <Button type="button" size="icon" variant={viewMode === "list" ? "secondary" : "ghost"} className="size-8" aria-label="List view" aria-pressed={viewMode === "list"} onClick={() => setViewMode("list")}><List className="size-4" /></Button>
+          <Button type="button" size="icon" variant={viewMode === "grid" ? "secondary" : "ghost"} className="size-8" aria-label="Grid view" aria-pressed={viewMode === "grid"} onClick={() => setViewMode("grid")}><Grid2X2 className="size-4" /></Button>
+        </div>
       </div>
       {visibleFolders.length === 0 && visibleFiles.length === 0 ? (
         <div className="px-6 py-14 text-center text-sm text-muted-foreground">No matching files or folders.</div>
       ) : null}
-      <div className="hidden items-center gap-3 bg-muted/50 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground sm:flex">
+      <div className={cn("items-center gap-3 bg-muted/50 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground sm:flex", viewMode === "grid" && "hidden")}>
         <span className="flex-1">Name</span>
         <span className="w-24 shrink-0 text-right">Size</span>
         <span className="hidden w-32 shrink-0 text-right md:block">Modified</span>
@@ -233,22 +276,22 @@ export function FileList({
       {visibleFolders.map((folder) => (
         <div
           key={folder._id}
-          className="group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-accent/70"
+          className={cn("group flex items-center gap-3 transition-colors hover:bg-accent/70", viewMode === "grid" ? "min-w-0 flex-col items-stretch rounded-xl border border-border/70 bg-card p-3" : "px-4 py-2.5")}
         >
-          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--brand-soft)] text-[var(--brand-soft-foreground)]">
-            <Folder className="size-4" />
+          <span className={cn("grid shrink-0 place-items-center rounded-lg bg-[var(--brand-soft)] text-[var(--brand-soft-foreground)]", viewMode === "grid" ? "h-24 w-full" : "size-8")}>
+            <Folder className={cn(viewMode === "grid" ? "size-9" : "size-4")} />
           </span>
           <button
             type="button"
             onClick={() => onOpenFolder(folder._id)}
-            className="min-w-0 flex-1 truncate text-left text-sm font-medium tracking-[-0.005em] transition-colors hover:text-[var(--brand)]"
+            className={cn("min-w-0 truncate text-left text-sm font-medium tracking-[-0.005em] transition-colors hover:text-[var(--brand)]", viewMode === "grid" ? "w-full" : "flex-1")}
           >
             {folder.name}
           </button>
-          <span className="hidden w-24 shrink-0 text-right font-mono-nums text-xs text-muted-foreground sm:block">
+          <span className={cn("w-24 shrink-0 text-right font-mono-nums text-xs text-muted-foreground", viewMode === "grid" ? "hidden" : "hidden sm:block")}>
             —
           </span>
-          <span className="hidden w-32 shrink-0 text-right text-xs text-muted-foreground md:block">
+          <span className={cn("w-32 shrink-0 text-right text-xs text-muted-foreground", viewMode === "grid" ? "hidden" : "hidden md:block")}>
             {formatDate(folder.createdAt)}
           </span>
 
@@ -295,7 +338,7 @@ export function FileList({
         return (
           <div
             key={file._id}
-            className="group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-accent/70"
+            className={cn("group flex items-center gap-3 transition-colors hover:bg-accent/70", viewMode === "grid" ? "min-w-0 flex-col items-stretch rounded-xl border border-border/70 bg-card p-3" : "px-4 py-2.5")}
           >
             <span
               className={cn(
@@ -314,7 +357,7 @@ export function FileList({
               disabled={uploading}
               title={uploading ? "Still uploading" : `Open ${file.name}`}
               onClick={() => onOpen(file)}
-              className="min-w-0 flex-1 truncate text-left text-sm tracking-[-0.005em] transition-colors hover:text-[var(--brand)] disabled:cursor-default disabled:hover:text-foreground"
+              className={cn("min-w-0 truncate text-left text-sm tracking-[-0.005em] transition-colors hover:text-[var(--brand)] disabled:cursor-default disabled:hover:text-foreground", viewMode === "grid" ? "w-full" : "flex-1")}
             >
               {file.name}
               {uploading ? (
@@ -328,10 +371,10 @@ export function FileList({
                 </span>
               ) : null}
             </button>
-            <span className="hidden w-24 shrink-0 text-right font-mono-nums text-xs text-muted-foreground sm:block">
+            <span className={cn("w-24 shrink-0 text-right font-mono-nums text-xs text-muted-foreground", viewMode === "grid" ? "hidden" : "hidden sm:block")}>
               {uploading ? "—" : formatBytes(file.size)}
             </span>
-            <span className="hidden w-32 shrink-0 text-right text-xs text-muted-foreground md:block">
+            <span className={cn("w-32 shrink-0 text-right text-xs text-muted-foreground", viewMode === "grid" ? "hidden" : "hidden md:block")}>
               {formatDate(file.createdAt)}
             </span>
 
