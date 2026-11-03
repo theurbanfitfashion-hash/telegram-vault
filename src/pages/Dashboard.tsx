@@ -26,6 +26,7 @@ import { useAction, useMutation, useQuery } from "convex/react";
 import {
   ChevronRight,
   FolderPlus,
+  Headphones,
   Loader2,
   LogOut,
   Menu,
@@ -397,6 +398,10 @@ export default function Dashboard() {
             >
               <FolderPlus className="mr-2 size-4" />
               <span className="hidden sm:inline">New folder</span>
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => navigate("/music")}>
+              <Headphones className="mr-2 size-4" />
+              <span className="hidden sm:inline">Music</span>
             </Button>
             <Button size="sm" onClick={() => fileInputRef.current?.click()}>
               <Upload className="mr-2 size-4" />
