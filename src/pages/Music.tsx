@@ -240,13 +240,6 @@ export default function Music() {
     {audioElement}
     <main className="min-h-dvh bg-[#090d13] text-white">
       <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col px-4 pb-4 pt-0 sm:px-8">
-        <header className="flex items-center justify-between">
-          <Button variant="ghost" className="text-white/70 hover:bg-white/10 hover:text-white" onClick={() => navigate("/dashboard")}>
-            <ArrowLeft className="mr-2 size-4" /> Back to Vault
-          </Button>
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200/80"><AudioLines className="size-4" /> Vault Music</div>
-        </header>
-
         <section className="grid flex-1 items-start gap-6 pt-0 pb-6 sm:gap-8 sm:pt-0 sm:pb-10 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,.85fr)]">
           <div className="mx-auto w-full max-w-xl">
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="relative mx-auto mb-9 aspect-square w-full max-w-[340px] overflow-hidden rounded-[2rem] border border-white/10 bg-gradient-to-br from-[#17334a] via-[#132231] to-[#281b3b] p-7">
