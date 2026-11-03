@@ -238,8 +238,8 @@ export default function Music() {
   return (
     <>
     {audioElement}
-    <main className="h-dvh overflow-hidden bg-[#090d13] text-white">
-      <div className="mx-auto flex h-full w-full max-w-7xl flex-col px-3 pt-1 pb-2 sm:px-5">
+    <main className="min-h-dvh bg-[#090d13] text-white">
+      <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col px-4 pb-8 pt-5 sm:px-8">
         <header className="flex items-center justify-between">
           <Button variant="ghost" className="text-white/70 hover:bg-white/10 hover:text-white" onClick={() => navigate("/dashboard")}>
             <ArrowLeft className="mr-2 size-4" /> Back to Vault
@@ -247,9 +247,9 @@ export default function Music() {
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200/80"><AudioLines className="size-4" /> Vault Music</div>
         </header>
 
-        <section className="grid min-h-0 flex-1 grid-cols-1 items-center gap-2 overflow-hidden py-0 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,.85fr)] xl:gap-5">
-          <div className="mx-auto flex min-h-0 w-full max-w-xl flex-col justify-center">
-            <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="relative mx-auto mb-2 aspect-square w-[min(300px,29vh)] max-w-full overflow-hidden rounded-[2rem] border border-white/10 bg-gradient-to-br from-[#17334a] via-[#132231] to-[#281b3b] p-7">
+        <section className="grid flex-1 items-start gap-6 py-6 sm:gap-8 sm:py-10 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,.85fr)]">
+          <div className="mx-auto w-full max-w-xl">
+            <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="relative mx-auto mb-9 aspect-square w-full max-w-[340px] overflow-hidden rounded-[2rem] border border-white/10 bg-gradient-to-br from-[#17334a] via-[#132231] to-[#281b3b] p-7">
               <div className="absolute inset-0 opacity-40" style={{ backgroundImage: "radial-gradient(circle at 25% 20%, #41d9d0 0, transparent 34%), radial-gradient(circle at 80% 80%, #a855f7 0, transparent 38%)" }} />
               <div className="relative flex h-full flex-col items-center justify-center">
                 <div className="relative grid size-[68%] place-items-center rounded-full border border-white/20 bg-[#0b111b]/80">
@@ -269,17 +269,17 @@ export default function Music() {
               <p className="mt-2 text-sm text-white/45">{activeTrack ? `${formatBytes(activeTrack.size)} · Telegram Vault` : "Your music collection lives here"}</p>
             </div>
 
-            <div className="mt-2">
+            <div className="mt-8">
               <div className="mb-2 flex justify-between font-mono text-[11px] text-white/45"><span>{clock(currentTime)}</span><span>{clock(duration)}</span></div>
               <input aria-label="Seek track" type="range" min={0} max={duration || 1} step={0.1} value={Math.min(currentTime, duration || 1)} onChange={(event) => { const time = Number(event.target.value); if (audioRef.current) audioRef.current.currentTime = time; setCurrentTime(time); }} className="h-1.5 w-full cursor-pointer accent-cyan-300" />
-              <div className="mt-2 flex items-center justify-center gap-5">
+              <div className="mt-5 flex items-center justify-center gap-5">
                 <button aria-label="Shuffle" onClick={() => setShuffle(!shuffle)} className={`rounded-full p-2 ${shuffle ? "text-cyan-300" : "text-white/45 hover:text-white"}`}><Shuffle className="size-4" /></button>
                 <button aria-label="Previous track" onClick={previous} className="rounded-full p-2 text-white/80 hover:text-cyan-200"><SkipBack className="size-6" fill="currentColor" /></button>
                 <button aria-label={playing ? "Pause" : "Play"} onClick={togglePlay} disabled={!activeTrack || loadingSource || !source} className="grid size-16 place-items-center rounded-full bg-cyan-300 text-[#07121c] transition-transform hover:scale-105 disabled:opacity-40">{playing ? <Pause className="size-6" fill="currentColor" /> : <Play className="ml-1 size-6" fill="currentColor" />}</button>
                 <button aria-label="Next track" onClick={next} className="rounded-full p-2 text-white/80 hover:text-cyan-200"><SkipForward className="size-6" fill="currentColor" /></button>
                 <button aria-label="Repeat mode" onClick={() => setRepeat((value) => value === "off" ? "all" : value === "all" ? "one" : "off")} className={`rounded-full p-2 ${repeat !== "off" ? "text-cyan-300" : "text-white/45 hover:text-white"}`}>{repeat === "one" ? <Repeat1 className="size-4" /> : <Repeat className="size-4" />}</button>
               </div>
-              <div className="mt-2 flex items-center justify-center gap-3 text-white/50">
+              <div className="mt-6 flex items-center justify-center gap-3 text-white/50">
                 <button aria-label="Mute" onClick={() => setMuted(!muted)}>{muted || volume === 0 ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}</button>
                 <input aria-label="Volume" type="range" min={0} max={1} step={0.01} value={muted ? 0 : volume} onChange={(event) => { setVolume(Number(event.target.value)); setMuted(false); }} className="w-28 cursor-pointer accent-cyan-300" />
               </div>
@@ -288,7 +288,7 @@ export default function Music() {
 
           </div>
 
-          <aside className="mx-auto flex min-h-0 h-full w-full max-w-xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-white/[0.035]">
+          <aside className="mx-auto w-full max-w-xl overflow-hidden rounded-3xl border border-white/10 bg-white/[0.035]">
             <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
               <div className="min-w-0 flex-1">
                 <p className="font-semibold">Your music</p>
@@ -306,7 +306,7 @@ export default function Music() {
             {tracks.length === 0 ? (
               <div className="px-6 py-16 text-center"><Disc3 className="mx-auto size-9 text-white/25" /><p className="mt-4 font-medium">No music found yet</p><p className="mt-2 text-sm leading-6 text-white/45">Upload MP3, M4A, WAV, FLAC or OGG files anywhere in your Vault.</p><Button className="mt-5 bg-cyan-300 text-slate-950 hover:bg-cyan-200" onClick={() => navigate("/dashboard")}>Open Vault</Button></div>
             ) : (
-              <div className="min-h-0 flex-1 overflow-y-auto p-2">
+              <div className="max-h-[55dvh] overflow-y-auto p-2">
                 <AnimatePresence initial={false}>
                   {visibleTracks.map((track, index) => {
                     const selected = track._id === activeTrack?._id;
@@ -334,7 +334,7 @@ export default function Music() {
             </div>}
           </aside>
         </section>
-        <footer className="hidden text-center text-[11px] tracking-wide text-white/25">PRIVATE AUDIO LIBRARY · STORED IN YOUR TELEGRAM CHAT</footer>
+        <footer className="text-center text-[11px] tracking-wide text-white/25">PRIVATE AUDIO LIBRARY · STORED IN YOUR TELEGRAM CHAT</footer>
       </div>
     </main>
     </>
