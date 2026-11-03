@@ -141,6 +141,22 @@ export const listFiles = query({
   },
 });
 
+/** Returns the total size of completed uploads across all folders. */
+export const getStorageUsage = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await requireUser(ctx);
+    const files = await ctx.db
+      .query("files")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+    return files.reduce(
+      (total, file) => total + (file.status === "ready" ? file.size : 0),
+      0,
+    );
+  },
+});
+
 /** Lists this user's files across every folder for global views such as Music. */
 export const listAllFiles = query({
   args: {},
