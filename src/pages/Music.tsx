@@ -56,6 +56,7 @@ export default function Music() {
   });
   const [selectedPlaylistId, setSelectedPlaylistId] = useState("all");
   const audioRef = useRef<HTMLAudioElement>(null);
+  const autoplayAfterLoad = useRef(false);
   const visibleTracks = selectedPlaylistId === "all"
     ? tracks
     : tracks.filter((track) => playlists.find((list) => list.id === selectedPlaylistId)?.trackIds.includes(track._id));
@@ -119,6 +120,7 @@ export default function Music() {
   }, [volume, muted, source]);
 
   const playTrack = useCallback(async (id: Id<"files">) => {
+    autoplayAfterLoad.current = true;
     setActiveId(id);
     setPlaying(false);
     setPlaybackError(null);
@@ -127,6 +129,7 @@ export default function Music() {
   const next = useCallback(() => {
     if (!tracks.length) return;
     if (upNext.length) {
+      autoplayAfterLoad.current = true;
       setActiveId(upNext[0]);
       setUpNext((current) => current.slice(1));
       setPlaying(false);
@@ -134,6 +137,9 @@ export default function Music() {
     }
     const queueTracks = visibleTracks.length ? visibleTracks : tracks;
     const index = queueTracks.findIndex((track) => track._id === activeTrack?._id);
+    if ((shuffle && tracks.length > 1) || index < queueTracks.length - 1 || repeat === "all") {
+      autoplayAfterLoad.current = true;
+    }
     if (shuffle && tracks.length > 1) {
       let random = index;
       while (random === index) random = Math.floor(Math.random() * tracks.length);
@@ -148,8 +154,8 @@ export default function Music() {
     const audio = audioRef.current;
     if (audio && audio.currentTime > 3) { audio.currentTime = 0; return; }
     const index = tracks.findIndex((track) => track._id === activeTrack?._id);
-    if (index > 0) setActiveId(tracks[index - 1]._id);
-    else if (repeat === "all" && tracks.length) setActiveId(tracks[tracks.length - 1]._id);
+    if (index > 0) { autoplayAfterLoad.current = true; setActiveId(tracks[index - 1]._id); }
+    else if (repeat === "all" && tracks.length) { autoplayAfterLoad.current = true; setActiveId(tracks[tracks.length - 1]._id); }
     setPlaying(false);
   }, [tracks, activeTrack?._id, repeat]);
 
@@ -210,7 +216,7 @@ export default function Music() {
               </div>
             </div>
             {loadingSource ? <p className="mt-4 text-center text-xs text-white/40">Preparing audio stream…</p> : playbackError ? <p role="alert" className="mt-4 text-center text-xs text-rose-300">{playbackError}</p> : activeTrack && !source ? <p className="mt-4 text-center text-xs text-white/40">Audio link is not ready yet.</p> : null}
-            <audio ref={audioRef} src={source ?? undefined} preload="metadata" onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)} onEnded={() => { if (repeat === "one" && audioRef.current) { audioRef.current.currentTime = 0; void audioRef.current.play(); } else next(); }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => { if (source) { setPlaying(false); setPlaybackError("The audio stream could not be loaded. Check the file format or try downloading it."); } }} />
+            <audio ref={audioRef} src={source ?? undefined} preload="metadata" onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)} onCanPlay={() => { if (autoplayAfterLoad.current && audioRef.current) { autoplayAfterLoad.current = false; void audioRef.current.play().then(() => { setPlaybackError(null); setPlaying(true); }).catch((error: unknown) => { console.error("Automatic playback failed", error); setPlaybackError("Tap Play to start this track. Your browser blocked automatic playback."); setPlaying(false); }); } }} onEnded={() => { if (repeat === "one" && audioRef.current) { audioRef.current.currentTime = 0; void audioRef.current.play(); } else next(); }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => { if (source) { setPlaying(false); setPlaybackError("The audio stream could not be loaded. Check the file format or try downloading it."); } }} />
           </div>
 
           <aside className="mx-auto w-full max-w-xl overflow-hidden rounded-3xl border border-white/10 bg-white/[0.035]">
