@@ -61,6 +61,14 @@ function inlineDisposition(fileName: string): string {
   return `inline; filename="${ascii}"; filename*=UTF-8''${filenameStar(fileName)}`;
 }
 
+/** Forces a save through the browser's native download manager. */
+function attachmentDisposition(fileName: string): string {
+  const ascii = fileName
+    .replace(/[^\\u0020-\\u007e]/g, "_")
+    .replace(/["\\\\]/g, "_");
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${filenameStar(fileName)}`;
+}
+
 /**
  * Resolves one part's Telegram handle and opens its byte stream. `file_path`
  * is only guaranteed fresh for an hour, so ask for it on every use.
