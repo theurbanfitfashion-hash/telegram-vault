@@ -74,8 +74,8 @@ async function readErrorMessage(response: Response): Promise<string> {
 }
 
 /**
- * Everything that moves bytes: parts are uploaded one at a time (which keeps
- * Telegram's per-chat pacing happy) and downloads stream back part by part.
+ * Everything that moves bytes: browser-to-Convex uploads are pipelined one
+ * part ahead while Telegram sends remain sequential; downloads stream part by part.
  */
 export function useTransfer() {
   const createFile = useMutation(api.vault.createFile);
@@ -104,21 +104,53 @@ export function useTransfer() {
     onPatch({ fileId, name, size: file.size, chunkCount });
 
     let confirmed = 0;
+    let reportedLoaded = 0;
+    const reportLoaded = (loaded: number) => {
+      reportedLoaded = Math.max(reportedLoaded, Math.min(loaded, file.size));
+      onPatch({ loaded: reportedLoaded });
+    };
     try {
-      for (let index = 0; index < chunkCount; index++) {
+      // Upload the next part to temporary Convex storage while the previous
+      // part is being forwarded to Telegram. Telegram sends remain sequential
+      // to respect per-chat rate limits and preserve the ordered parts list.
+      const prepareChunk = async (index: number) => {
         const start = index * CHUNK_BYTES;
         const slice = file.slice(start, Math.min(start + CHUNK_BYTES, file.size));
-        onPatch({ phase: "uploading", chunkIndex: index, loaded: confirmed });
+        const baseLoaded = start;
+        onPatch({ phase: "uploading", chunkIndex: index, loaded: reportedLoaded });
 
         const uploadUrl = await getChunkUploadUrl({ fileId, index });
-        const storageId = await postSlice(uploadUrl, slice, (loaded) =>
-          onPatch({ loaded: confirmed + Math.min(loaded, slice.size) }),
-        );
+        const storageId = await postSlice(uploadUrl, slice, (loaded) => {
+          onPatch({ phase: "uploading", chunkIndex: index });
+          reportLoaded(baseLoaded + Math.min(loaded, slice.size));
+        });
+        return { index, slice, storageId };
+      };
 
-        onPatch({ phase: "storing", chunkIndex: index, loaded: confirmed });
-        await sendChunk({ fileId, index, storageId });
-        confirmed += slice.size;
-        onPatch({ loaded: confirmed });
+      let current = chunkCount > 0 ? await prepareChunk(0) : null;
+      while (current) {
+        // Keep at most one additional 18 MiB part in flight. This overlaps
+        // client-to-Convex transfer with the server-to-Telegram transfer
+        // without creating an unbounded queue on mobile connections.
+        const next = current.index + 1 < chunkCount
+          ? prepareChunk(current.index + 1)
+          : null;
+
+        onPatch({
+          phase: "storing",
+          chunkIndex: current.index,
+          loaded: reportedLoaded,
+        });
+        reportLoaded(current.index * CHUNK_BYTES + current.slice.size);
+        await sendChunk({
+          fileId,
+          index: current.index,
+          storageId: current.storageId,
+        });
+        confirmed += current.slice.size;
+        reportLoaded(confirmed);
+
+        current = next ? await next : null;
       }
 
       await finishUpload({ fileId });
