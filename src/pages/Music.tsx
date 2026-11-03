@@ -132,7 +132,8 @@ export default function Music() {
     if (!activeTrack || !tracks.length) return;
     let cancelled = false;
     const queueIds = upNext.filter((id) => id !== activeTrack._id);
-    const pool = (visibleTracks.length ? visibleTracks : tracks)
+    const playbackPool = shuffle ? tracks : (visibleTracks.length ? visibleTracks : tracks);
+    const pool = playbackPool
       .filter((track) => track._id !== activeTrack._id && !queueIds.includes(track._id));
     if (shuffle) {
       for (let i = pool.length - 1; i > 0; i--) {
@@ -140,9 +141,8 @@ export default function Music() {
         [pool[i], pool[j]] = [pool[j], pool[i]];
       }
     } else {
-      const currentIndex = (visibleTracks.length ? visibleTracks : tracks)
-        .findIndex((track) => track._id === activeTrack._id);
-      const ordered = (visibleTracks.length ? visibleTracks : tracks)
+      const currentIndex = playbackPool.findIndex((track) => track._id === activeTrack._id);
+      const ordered = playbackPool
         .slice(currentIndex + 1)
         .filter((track) => !queueIds.includes(track._id));
       pool.splice(0, pool.length, ...ordered);
