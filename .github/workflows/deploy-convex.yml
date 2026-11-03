@@ -35,7 +35,7 @@ jobs:
             echo "::error::Add CONVEX_DEPLOY_KEY in GitHub repository Actions secrets."
             exit 1
           fi
-          npx convex deploy --yes
+          npx convex dev --once
           npx convex codegen
       - name: Commit generated Convex types
         run: |
