@@ -74,8 +74,8 @@ async function readErrorMessage(response: Response): Promise<string> {
 }
 
 /**
- * Everything that moves bytes: browser-to-Convex uploads are pipelined one
- * part ahead while Telegram sends remain sequential; downloads stream part by part.
+ * Everything that moves bytes: two indexed upload workers run concurrently;
+ * downloads stream part by part.
  */
 export function useTransfer() {
   const createFile = useMutation(api.vault.createFile);
@@ -103,55 +103,52 @@ export function useTransfer() {
     });
     onPatch({ fileId, name, size: file.size, chunkCount });
 
-    let confirmed = 0;
-    let reportedLoaded = 0;
-    const reportLoaded = (loaded: number) => {
-      reportedLoaded = Math.max(reportedLoaded, Math.min(loaded, file.size));
-      onPatch({ loaded: reportedLoaded });
+    let confirmedBytes = 0;
+    let estimatedLoaded = 0;
+    const inFlightProgress = new Map<number, number>();
+    const reportProgress = () => {
+      const activeBytes = [...inFlightProgress.values()].reduce((sum, value) => sum + value, 0);
+      estimatedLoaded = Math.max(
+        estimatedLoaded,
+        Math.min(file.size, confirmedBytes + activeBytes),
+      );
+      onPatch({ loaded: estimatedLoaded });
     };
     try {
-      // Upload the next part to temporary Convex storage while the previous
-      // part is being forwarded to Telegram. Telegram sends remain sequential
-      // to respect per-chat rate limits and preserve the ordered parts list.
-      const prepareChunk = async (index: number) => {
+      // Two workers send independently. Every part carries its immutable
+      // zero-based index; the backend stores handles by index and assembles
+      // the final ordered array only after every index has arrived.
+      const uploadPart = async (index: number) => {
         const start = index * CHUNK_BYTES;
         const slice = file.slice(start, Math.min(start + CHUNK_BYTES, file.size));
-        const baseLoaded = start;
-        onPatch({ phase: "uploading", chunkIndex: index, loaded: reportedLoaded });
+        onPatch({ phase: "uploading", chunkIndex: index });
 
         const uploadUrl = await getChunkUploadUrl({ fileId, index });
         const storageId = await postSlice(uploadUrl, slice, (loaded) => {
+          inFlightProgress.set(index, Math.min(loaded, slice.size));
           onPatch({ phase: "uploading", chunkIndex: index });
-          reportLoaded(baseLoaded + Math.min(loaded, slice.size));
+          reportProgress();
         });
-        return { index, slice, storageId };
+
+        onPatch({ phase: "storing", chunkIndex: index });
+        inFlightProgress.set(index, slice.size);
+        reportProgress();
+        await sendChunk({ fileId, index, storageId });
+
+        inFlightProgress.delete(index);
+        confirmedBytes += slice.size;
+        reportProgress();
       };
 
-      let current = chunkCount > 0 ? await prepareChunk(0) : null;
-      while (current) {
-        // Keep at most one additional 18 MiB part in flight. This overlaps
-        // client-to-Convex transfer with the server-to-Telegram transfer
-        // without creating an unbounded queue on mobile connections.
-        const next = current.index + 1 < chunkCount
-          ? prepareChunk(current.index + 1)
-          : null;
-
-        onPatch({
-          phase: "storing",
-          chunkIndex: current.index,
-          loaded: reportedLoaded,
-        });
-        reportLoaded(current.index * CHUNK_BYTES + current.slice.size);
-        await sendChunk({
-          fileId,
-          index: current.index,
-          storageId: current.storageId,
-        });
-        confirmed += current.slice.size;
-        reportLoaded(confirmed);
-
-        current = next ? await next : null;
-      }
+      let nextIndex = 0;
+      const worker = async () => {
+        while (nextIndex < chunkCount) {
+          const index = nextIndex++;
+          await uploadPart(index);
+        }
+      };
+      const concurrency = Math.min(2, chunkCount);
+      await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
       await finishUpload({ fileId });
       onPatch({ phase: "done", loaded: file.size });

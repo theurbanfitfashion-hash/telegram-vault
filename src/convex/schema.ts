@@ -66,6 +66,16 @@ const schema = defineSchema(
           messageId: v.optional(v.number()),
         }),
       ),
+      /** Temporary index-keyed Telegram handles while concurrent parts arrive. */
+      partMap: v.optional(
+        v.record(
+          v.string(),
+          v.object({
+            fileId: v.string(),
+            messageId: v.optional(v.number()),
+          }),
+        ),
+      ),
     })
       .index("by_user", ["userId"])
       .index("by_user_folder", ["userId", "folderId"]),
