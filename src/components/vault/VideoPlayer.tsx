@@ -29,6 +29,15 @@ export default function VideoPlayer({ src, title, onError }: { src: string; titl
 
   useEffect(() => () => { if (hideTimer.current) clearTimeout(hideTimer.current); }, []);
 
+  // Keep the native media element in sync with React controls on every mount.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.volume = volume;
+    video.muted = muted;
+    video.playbackRate = speed;
+  }, [volume, muted, speed, src]);
+
   const revealControls = () => {
     setControlsVisible(true);
     if (hideTimer.current) clearTimeout(hideTimer.current);
@@ -37,7 +46,7 @@ export default function VideoPlayer({ src, title, onError }: { src: string; titl
   const togglePlay = () => {
     const video = videoRef.current;
     if (!video) return;
-    if (video.paused) void video.play().catch(() => onError());
+    if (video.paused) void video.play().catch((error) => { console.error("Video playback failed", error); onError(); });
     else video.pause();
   };
   const seekBy = (amount: number) => {
