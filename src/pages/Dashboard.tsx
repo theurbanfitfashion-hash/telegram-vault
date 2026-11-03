@@ -18,6 +18,7 @@ import { ConfirmDialog, MoveDialog, NameDialog } from "@/components/vault/dialog
 import { UploadQueue } from "@/components/vault/UploadQueue";
 import { useAuth } from "@/hooks/use-auth";
 import { CHUNK_BYTES } from "@/lib/constants";
+import { formatBytes } from "@/lib/format";
 import { errorMessage } from "@/lib/errors";
 import { buildTree, folderPath, subtreeIds } from "@/lib/folders";
 import { useTransfer, type UploadPatch, type UploadState } from "@/lib/transfer";
@@ -55,6 +56,7 @@ export default function Dashboard() {
 
   // --- location ----------------------------------------------------------
   const folders = useQuery(api.vault.listFolders);
+  const storageUsage = useQuery(api.vault.getStorageUsage);
   const foldersReady = folders !== undefined;
   const requestedId = searchParams.get("f");
   const requestedIsValid =
@@ -669,6 +671,10 @@ export default function Dashboard() {
   );
 }
 
+function formatStorageSize(bytes: number) {
+  return formatBytes(bytes);
+}
+
 function SidebarBody({
   tree,
   activeId,
@@ -724,6 +730,13 @@ function SidebarBody({
           onMove={onMove}
           onDelete={onDelete}
         />
+      </div>
+
+      <div className="mx-3 mb-3 rounded-lg border border-sidebar-border bg-sidebar-accent/40 px-3 py-2.5">
+        <p className="text-xs font-medium text-muted-foreground">Total uploaded</p>
+        <p className="mt-1 text-lg font-semibold tracking-tight text-foreground">
+          {storageUsage === undefined ? "Calculating…" : formatStorageSize(storageUsage)}
+        </p>
       </div>
 
       <div className="space-y-2.5 border-t border-sidebar-border p-3">
