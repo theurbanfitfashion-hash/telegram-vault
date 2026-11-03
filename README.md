@@ -19,7 +19,7 @@ Use bun for the package manager.
 
 ## Setup
 
-This project is set up already and running on a cloud environment, as well as a convex development in the sandbox.
+This is an independent deployment. The frontend is hosted on Render and the backend/database/auth/file metadata are hosted in the project's own Convex deployment. Telegram file bytes are stored in the Telegram chat connected by each user. Do not connect this app to another project's Convex deployment or secrets.
 
 ## Environment Variables
 
@@ -27,7 +27,7 @@ The project is set up with project specific CONVEX_DEPLOYMENT and VITE_CONVEX_UR
 
 The convex server has a separate set of environment variables that are accessible by the convex backend.
 
-Currently, these variables include auth-specific keys: JWKS, JWT_PRIVATE_KEY, and SITE_URL.
+Convex Auth also requires its deployment auth keys (`JWKS`, `JWT_PRIVATE_KEY`) and `SITE_URL=https://telegram-vault-web.onrender.com`. The GitHub Actions deployment workflow sets `SITE_URL` automatically. Set `RESEND_API_KEY` and `AUTH_EMAIL_FROM` in the Convex deployment settings to enable email OTP. Google sign-in requires `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET` there too.
 
 
 # Using Authentication (Important!)
@@ -38,9 +38,7 @@ You must follow these conventions when using authentication.
 
 All convex authentication functions are already set up. The auth currently uses email OTP and anonymous users, but can support more.
 
-The email OTP configuration is defined in `src/convex/auth/emailOtp.ts`. DO NOT MODIFY THIS FILE.
-
-Also, DO NOT MODIFY THESE AUTH FILES: `src/convex/auth.config.ts` and `src/convex/auth.ts`.
+Email OTP is sent through this project's own Resend account (`RESEND_API_KEY` and `AUTH_EMAIL_FROM` on the Convex deployment). Guest sign-in is local to this project's Convex Auth deployment. Google sign-in requires this project's own Google OAuth credentials (`AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET`). No Freebuff/VLY identity provider is used.
 
 ## Using Convex Auth on the backend
 
