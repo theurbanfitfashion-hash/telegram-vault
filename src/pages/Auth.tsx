@@ -15,7 +15,8 @@ import {
 } from "@/components/ui/input-otp";
 
 import { useAuth } from "@/hooks/use-auth";
-import logo from "@/assets/logo.svg";\nimport { AccountUpgrade } from "@/components/AccountUpgrade";
+import logo from "@/assets/logo.svg";
+import { AccountUpgrade } from "@/components/AccountUpgrade";
 import { ArrowRight, Loader2, LogOut, Mail, UserX } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
