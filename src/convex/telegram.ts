@@ -278,6 +278,7 @@ export const connectBot = action({
     }
     await ctx.runMutation(internal.vault.saveTelegramConfig, {
       userId,
+      botId: String(me.id),
       botToken: token,
       botUsername: me.username,
       resetChat: false,
