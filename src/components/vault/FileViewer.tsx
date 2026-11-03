@@ -26,7 +26,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { ListedFile } from "./FileList";
 
 /**
@@ -35,7 +35,6 @@ import type { ListedFile } from "./FileList";
  */
 const TEXT_RENDER_LIMIT = 2 * 1024 * 1024;
 
-const VideoPlayer = lazy(() => import("./VideoPlayer"));
 
 const KIND_ICON: Record<ViewerKind, LucideIcon> = {
   image: ImageIcon,
@@ -242,13 +241,20 @@ function ViewerSurface({
 
       case "video":
         return (
-          <Suspense fallback={<Working label="Loading video player…" />}>
-            <VideoPlayer
+          <div className="flex h-full w-full items-center justify-center overflow-hidden bg-black p-2 sm:p-4">
+            <video
               src={source}
-              title={file.name}
-              onError={() => setBodyError("This video couldn't be played in the browser. The format or codec may not be supported by this browser.")}
-            />
-          </Suspense>
+              controls
+              playsInline
+              preload="metadata"
+              className="max-h-full max-w-full"
+              onError={() =>
+                setBodyError("Your browser couldn't play this video. The video codec may not be supported.")
+              }
+            >
+              Your browser does not support HTML5 video.
+            </video>
+          </div>
         );
 
       case "audio":
