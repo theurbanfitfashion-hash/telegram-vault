@@ -17,7 +17,7 @@ export const emailOtp = Email({
     const from = process.env.AUTH_EMAIL_FROM;
     if (!apiKey || !from) {
       throw new Error(
-        "Email sign-in is not configured yet. Set RESEND_API_KEY and AUTH_EMAIL_FROM on this Telegram Vault Convex deployment, or continue as Guest.",
+        "Email sign-in is not configured yet. Set RESEND_API_KEY and AUTH_EMAIL_FROM on this Telegram Vault Convex deployment.",
       );
     }
 
