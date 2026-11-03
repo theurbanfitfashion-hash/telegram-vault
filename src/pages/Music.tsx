@@ -239,7 +239,7 @@ export default function Music() {
     <>
     {audioElement}
     <main className="min-h-dvh bg-[#090d13] text-white">
-      <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col px-4 pb-8 pt-5 sm:px-8">
+      <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col px-4 pb-4 pt-0 sm:px-8">
         <header className="flex items-center justify-between">
           <Button variant="ghost" className="text-white/70 hover:bg-white/10 hover:text-white" onClick={() => navigate("/dashboard")}>
             <ArrowLeft className="mr-2 size-4" /> Back to Vault
