@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/input-otp";
 import { useAuth } from "@/hooks/use-auth";
 import logo from "@/assets/logo.svg";
-import { ArrowRight, Loader2, LogOut, Mail } from "lucide-react";
+import { ArrowRight, Loader2, LogOut, Mail, Bot } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
@@ -35,6 +35,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const redirect = resolveRedirectAfterAuth(searchParams.get("returnTo"), redirectAfterAuth);
   const [step, setStep] = useState<"signIn" | { email: string }>("signIn");
   const [otp, setOtp] = useState("");
+  const [botToken, setBotToken] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
@@ -81,6 +82,20 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       setError(caught instanceof Error ? caught.message : "The verification code is incorrect.");
       setOtp("");
     } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleGuestLogin = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsLoading(true);
+    setError(null);
+    try {
+      await signIn("bot-token-guest", { botToken: botToken.trim() });
+      navigate(redirect, { replace: true });
+    } catch (caught) {
+      console.error("Guest bot sign-in error:", caught);
+      setError(caught instanceof Error ? caught.message : "Could not verify this Telegram bot token.");
       setIsLoading(false);
     }
   };
@@ -201,7 +216,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             </>
           )}
           <div className="rounded-b-lg border-t bg-muted px-6 py-4 text-center text-xs text-muted-foreground">
-            Your account is securely synced across devices.
+            Guest vaults are shared by Telegram bot identity. Google and email vaults remain private.
           </div>
         </Card>
       </div>
