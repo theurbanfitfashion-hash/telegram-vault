@@ -111,6 +111,7 @@ function ViewerSurface({
   const createDownloadToken = useMutation(api.vault.createDownloadToken);
 
   const [source, setSource] = useState<string | null>(null);
+  const [imageSource, setImageSource] = useState<string | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
   const [bodyError, setBodyError] = useState<string | null>(null);
   const [text, setText] = useState<string | null>(null);
@@ -135,6 +136,37 @@ function ViewerSurface({
     };
   }, [file._id, createDownloadToken]);
 
+  // Load image bytes explicitly for more reliable mobile in-app previews.
+  useEffect(() => {
+    if (kind !== "image" || source === null) return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    fetch(source)
+      .then(async (response) => {
+        if (!response.ok) {
+          const detail = await response.text().catch(() => "");
+          throw new Error(detail || `The file server returned HTTP ${response.status}.`);
+        }
+        return response.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setImageSource(objectUrl);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          console.error("Image preview failed:", error);
+          setBodyError(error instanceof Error ? error.message : "The image could not be loaded.");
+        }
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setImageSource(null);
+      setReady(false);
+    };
+  }, [kind, source]);
   useEffect(() => {
     if (!renderText || source === null) return;
     let cancelled = false;
@@ -200,7 +232,7 @@ function ViewerSurface({
         return (
           <div className="relative flex h-full items-center justify-center overflow-hidden bg-muted/40 p-4">
             <img
-              src={source}
+              src={imageSource ?? undefined}
               alt={file.name}
               className={cn(
                 "max-h-full max-w-full object-contain transition-opacity duration-200",
@@ -393,7 +425,7 @@ export function FileViewer({
     >
       <DialogContent
         showCloseButton={false}
-        className="flex h-[min(88dvh,54rem)] w-[min(96vw,72rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(96vw,72rem)]"
+        className="flex h-[min(92dvh,54rem)] w-[min(98vw,72rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(96vw,72rem)]"
       >
         {shown ? (
           <ViewerSurface
