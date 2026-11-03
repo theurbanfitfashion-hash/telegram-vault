@@ -71,6 +71,46 @@ async function getOwnedFolder(
 }
 
 // ---------------------------------------------------------------------------
+// Guest vault identity
+// ---------------------------------------------------------------------------
+
+/** Resolve a verified Telegram bot to one shared guest user across devices. */
+export const resolveGuestBotVault = internalMutation({
+  args: { botId: v.string(), botToken: v.string(), botUsername: v.string() },
+  handler: async (ctx, { botId, botToken, botUsername }) => {
+    const existing = await ctx.db
+      .query("guestBotVaults")
+      .withIndex("by_bot_id", (q) => q.eq("botId", botId))
+      .unique();
+    let userId: Id<"users">;
+    if (existing) {
+      userId = existing.userId;
+      await ctx.db.patch(existing._id, { botUsername, updatedAt: Date.now() });
+    } else {
+      userId = await ctx.db.insert("users", {
+        name: `Guest vault · @${botUsername}`,
+        isAnonymous: true,
+      });
+      await ctx.db.insert("guestBotVaults", {
+        botId, userId, botUsername, createdAt: Date.now(), updatedAt: Date.now(),
+      });
+    }
+    const config = await ctx.db
+      .query("telegramConfig")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .unique();
+    if (config) {
+      await ctx.db.patch(config._id, { botToken, botUsername, updatedAt: Date.now() });
+    } else {
+      await ctx.db.insert("telegramConfig", {
+        userId, botToken, botUsername, updatedAt: Date.now(),
+      });
+    }
+    return userId;
+  },
+});
+
+// ---------------------------------------------------------------------------
 // Reads
 // ---------------------------------------------------------------------------
 
