@@ -61,6 +61,14 @@ function inlineDisposition(fileName: string): string {
   return `inline; filename="${ascii}"; filename*=UTF-8''${filenameStar(fileName)}`;
 }
 
+/** Forces a save through the browser's native download manager. */
+function attachmentDisposition(fileName: string): string {
+  const ascii = fileName
+    .replace(/[^\\u0020-\\u007e]/g, "_")
+    .replace(/["\\\\]/g, "_");
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${filenameStar(fileName)}`;
+}
+
 /**
  * Resolves one part's Telegram handle and opens its byte stream. `file_path`
  * is only guaranteed fresh for an hour, so ask for it on every use.
@@ -247,7 +255,8 @@ function streamRange(
  */
 const downloadWhole = httpAction(async (ctx, request) => {
   try {
-    const { pathname } = new URL(request.url);
+    const url = new URL(request.url);
+    const { pathname } = url;
     const [, route, token] = pathname.split("/");
     if (route !== "file" || !token) return textResponse(404, "Not found");
   
@@ -258,7 +267,9 @@ const downloadWhole = httpAction(async (ctx, request) => {
     const headers: Record<string, string> = {
       ...CORS_HEADERS,
       "Content-Type": contentType,
-      "Content-Disposition": inlineDisposition(file.fileName),
+      "Content-Disposition": url.searchParams.get("download") === "1"
+        ? attachmentDisposition(file.fileName)
+        : inlineDisposition(file.fileName),
       "Accept-Ranges": "bytes",
       "Cache-Control": "private, max-age=600",
       "X-Content-Type-Options": "nosniff",
