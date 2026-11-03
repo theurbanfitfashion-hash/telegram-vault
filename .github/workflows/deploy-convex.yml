@@ -11,6 +11,10 @@ on:
       - "package-lock.json"
       - ".github/workflows/deploy-convex.yml"
 
+concurrency:
+  group: telegram-vault-main-maintenance
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
