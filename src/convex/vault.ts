@@ -101,6 +101,19 @@ export const listFiles = query({
   },
 });
 
+/** Lists this user's files across every folder for global views such as Music. */
+export const listAllFiles = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await requireUser(ctx);
+    const files = await ctx.db
+      .query("files")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+    return files.map(toListed);
+  },
+});
+
 // ---------------------------------------------------------------------------
 // Folders
 // ---------------------------------------------------------------------------
