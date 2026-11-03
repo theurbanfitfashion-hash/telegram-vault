@@ -347,7 +347,7 @@ const downloadPart = httpAction(async (ctx, request) => {
     return textResponse(410, "This download link has expired.");
   }
 
-  let upstream: ReadableStream<Uint8Array>;
+  let upstream: Uint8Array;
   try {
     upstream = await openPart(part.botToken, part.telegramFileId);
   } catch {
