@@ -181,8 +181,8 @@ export default function Music() {
     return (
       <>
       {audioElement}
-      <div className="fixed inset-x-3 bottom-3 z-50 sm:inset-x-6 sm:bottom-5">
-        <div className="relative mx-auto max-w-5xl overflow-hidden rounded-2xl border border-border/70 bg-background/80 shadow-[0_12px_48px_rgba(0,0,0,.22)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/65">
+      <div className="fixed inset-x-3 bottom-3 z-50 flex justify-end sm:inset-x-6 sm:bottom-5 lg:left-[280px] lg:right-6">
+        <div className="relative ml-auto w-full max-w-[760px] overflow-hidden rounded-2xl border border-border/70 bg-background/80 shadow-[0_12px_48px_rgba(0,0,0,.22)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/65">
           <div className="flex min-h-[76px] items-center gap-3 px-3 py-2.5 sm:gap-4 sm:px-5">
             <button type="button" onClick={() => navigate("/music")} className="flex min-w-0 flex-1 items-center gap-3 text-left">
               <span className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-xl border border-border/60 bg-muted shadow-sm sm:size-12">
