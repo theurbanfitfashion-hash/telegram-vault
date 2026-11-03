@@ -345,6 +345,16 @@ export const getTelegramConfigDoc = internalQuery({
   },
 });
 
+export const getTelegramBotDoc = internalQuery({
+  args: { botId: v.string() },
+  handler: async (ctx, { botId }) => {
+    return await ctx.db
+      .query("telegramBots")
+      .withIndex("by_bot_id", (q) => q.eq("botId", botId))
+      .unique();
+  },
+});
+
 export const getFileForUpload = internalQuery({
   args: { fileId: v.id("files"), userId: v.id("users") },
   handler: async (ctx, { fileId, userId }) => {
@@ -379,14 +389,22 @@ export const resolveWholeFile = internalQuery({
       .query("telegramConfig")
       .withIndex("by_user", (q) => q.eq("userId", record.userId))
       .unique();
-    if (!config?.botToken || !config.chatId) return null;
+    if (!config?.botToken) return null;
+    const bot = config.botId
+      ? await ctx.db.query("telegramBots")
+          .withIndex("by_bot_id", (q) => q.eq("botId", config.botId!))
+          .unique()
+      : null;
+    const botToken = bot?.botToken ?? config.botToken;
+    const chatId = bot?.chatId ?? config.chatId;
+    if (!botToken || !chatId) return null;
 
     return {
       fileName: file.name,
       mimeType: file.mimeType,
       size: file.size,
       chunkBytes: file.chunkBytes ?? CHUNK_BYTES,
-      botToken: config.botToken,
+      botToken,
       partIds: file.parts.map((part) => part.fileId),
     };
   },
@@ -412,12 +430,20 @@ export const resolveDownload = internalQuery({
       .query("telegramConfig")
       .withIndex("by_user", (q) => q.eq("userId", record.userId))
       .unique();
-    if (!config?.botToken || !config.chatId) return null;
+    if (!config?.botToken) return null;
+    const bot = config.botId
+      ? await ctx.db.query("telegramBots")
+          .withIndex("by_bot_id", (q) => q.eq("botId", config.botId!))
+          .unique()
+      : null;
+    const botToken = bot?.botToken ?? config.botToken;
+    const chatId = bot?.chatId ?? config.chatId;
+    if (!botToken || !chatId) return null;
 
     return {
       telegramFileId: part.fileId,
-      botToken: config.botToken,
-      chatId: config.chatId,
+      botToken,
+      chatId,
       partCount: file.chunkCount,
       fileName: file.name,
       mimeType: file.mimeType,
@@ -492,31 +518,55 @@ export const collectFolder = internalQuery({
 export const saveTelegramConfig = internalMutation({
   args: {
     userId: v.id("users"),
+    botId: v.string(),
     botToken: v.string(),
     botUsername: v.string(),
     resetChat: v.boolean(),
   },
-  handler: async (ctx, { userId, botToken, botUsername, resetChat }) => {
+  handler: async (ctx, { userId, botId, botToken, botUsername, resetChat }) => {
     const existing = await ctx.db
       .query("telegramConfig")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .unique();
     const botChanged =
-      existing?.botUsername !== undefined &&
-      existing.botUsername !== botUsername;
-    const dropChat = resetChat || botChanged;
+      existing?.botId !== undefined && existing.botId !== botId;
     if (existing) {
       await ctx.db.patch(existing._id, {
+        botId,
         botToken,
         botUsername,
         updatedAt: Date.now(),
-        ...(dropChat ? { chatId: undefined, chatTitle: undefined } : {}),
+        ...(resetChat || botChanged ? { chatId: undefined, chatTitle: undefined } : {}),
       });
     } else {
       await ctx.db.insert("telegramConfig", {
         userId,
+        botId,
         botToken,
         botUsername,
+        updatedAt: Date.now(),
+      });
+    }
+
+    const shared = await ctx.db
+      .query("telegramBots")
+      .withIndex("by_bot_id", (q) => q.eq("botId", botId))
+      .unique();
+    const legacyChatId = !botChanged && !resetChat ? existing?.chatId : undefined;
+    const legacyChatTitle = !botChanged && !resetChat ? existing?.chatTitle : undefined;
+    if (shared) {
+      await ctx.db.patch(shared._id, {
+        botToken,
+        botUsername,
+        updatedAt: Date.now(),
+        ...(shared.chatId ? {} : legacyChatId ? { chatId: legacyChatId, chatTitle: legacyChatTitle } : {}),
+      });
+    } else {
+      await ctx.db.insert("telegramBots", {
+        botId,
+        botToken,
+        botUsername,
+        ...(legacyChatId ? { chatId: legacyChatId, chatTitle: legacyChatTitle } : {}),
         updatedAt: Date.now(),
       });
     }
@@ -525,29 +575,21 @@ export const saveTelegramConfig = internalMutation({
 
 export const saveChat = internalMutation({
   args: {
-    userId: v.id("users"),
+    botId: v.string(),
     chatId: v.string(),
     chatTitle: v.optional(v.string()),
   },
-  handler: async (ctx, { userId, chatId, chatTitle }) => {
+  handler: async (ctx, { botId, chatId, chatTitle }) => {
     const existing = await ctx.db
-      .query("telegramConfig")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .query("telegramBots")
+      .withIndex("by_bot_id", (q) => q.eq("botId", botId))
       .unique();
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        chatId,
-        chatTitle,
-        updatedAt: Date.now(),
-      });
-    } else {
-      await ctx.db.insert("telegramConfig", {
-        userId,
-        chatId,
-        chatTitle,
-        updatedAt: Date.now(),
-      });
-    }
+    if (!existing) throw new Error("Connect the bot before saving its Telegram chat.");
+    await ctx.db.patch(existing._id, {
+      chatId,
+      chatTitle,
+      updatedAt: Date.now(),
+    });
   },
 });
 
