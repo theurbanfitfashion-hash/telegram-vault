@@ -25,6 +25,7 @@ interface SaveFilePicker {
     createWritable: () => Promise<{
       write: (data: Uint8Array) => Promise<void>;
       close: () => Promise<void>;
+      abort?: () => Promise<void>;
     }>;
   }>;
 }
