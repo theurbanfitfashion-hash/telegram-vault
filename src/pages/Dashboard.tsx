@@ -342,7 +342,7 @@ export default function Dashboard() {
   );
 
   return (
-    <div className="flex h-dvh overflow-hidden bg-background pb-16 text-foreground">
+    <div className="flex h-dvh overflow-hidden bg-background text-foreground">
       <Sheet>
         <aside className="hidden w-[264px] shrink-0 border-r border-sidebar-border bg-sidebar lg:block">
           {sidebar}
