@@ -1,10 +1,17 @@
 {
-  "name": "Telegram Vault",
-  "short_name": "Vault",
-  "description": "Your personal Telegram cloud storage vault.",
+  "name": "freebuff.com application",
+  "short_name": "freebuff.com",
+  "description": "freebuff.com application",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#020817",
-  "theme_color": "#071a42",
-  "icons": [{"src":"/logo.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]
+  "background_color": "#ffffff",
+  "theme_color": "#000000",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
 }
