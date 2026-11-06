@@ -76,8 +76,8 @@ async function readErrorMessage(response: Response): Promise<string> {
 }
 
 /**
- * Everything that moves bytes: two indexed upload workers run concurrently;
- * downloads stream part by part.
+ * Everything that moves bytes: up to three indexed upload workers run concurrently;
+ * slower or data-saving connections use fewer workers; downloads stream part by part.
  */
 export function useTransfer() {
   const createFile = useMutation(api.vault.createFile);
@@ -103,7 +103,17 @@ export function useTransfer() {
       mimeType: file.type || "application/octet-stream",
       folderId,
     });
-    const concurrency = Math.min(2, chunkCount);
+    const connection = (navigator as Navigator & {
+      connection?: { effectiveType?: string; saveData?: boolean };
+    }).connection;
+    const effectiveType = connection?.effectiveType;
+    const maxWorkers =
+      connection?.saveData || effectiveType === "slow-2g" || effectiveType === "2g"
+        ? 1
+        : effectiveType === "3g"
+          ? 2
+          : 3;
+    const concurrency = Math.min(maxWorkers, chunkCount);
     const confirmedBytes = Array.from({ length: concurrency }, () => 0);
     const estimatedLoaded = Array.from({ length: concurrency }, () => 0);
     const inFlightProgress = new Map<number, number>();
@@ -129,7 +139,7 @@ export function useTransfer() {
       onPatch({ loaded: estimatedLoaded[workerIndex] }, workerIndex);
     };
     try {
-      // Two workers send independently. Every part carries its immutable
+      // Workers send independently. Every part carries its immutable
       // zero-based index; the backend stores handles by index and assembles
       // the final ordered array only after every index has arrived.
       const uploadPart = async (index: number, workerIndex: number) => {
