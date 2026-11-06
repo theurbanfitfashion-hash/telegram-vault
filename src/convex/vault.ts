@@ -237,16 +237,54 @@ export const createFile = mutation({
     mimeType: v.string(),
     folderId: v.union(v.id("folders"), v.null()),
   },
+  returns: v.object({
+    fileId: v.id("files"),
+    chunkCount: v.number(),
+    uploadedIndexes: v.array(v.number()),
+    resumed: v.boolean(),
+  }),
   handler: async (ctx, { name, size, mimeType, folderId }) => {
     const userId = await requireUser(ctx);
     if (folderId !== null) await getOwnedFolder(ctx, userId, folderId);
     if (!Number.isFinite(size) || size < 0) throw new Error("Invalid file size.");
+    const cleanedName = cleanName(name);
     const bytes = Math.floor(size);
+    const normalizedMimeType = mimeType || "application/octet-stream";
     const chunkCount = bytes === 0 ? 0 : Math.ceil(bytes / CHUNK_BYTES);
+
+    // Reuse the newest matching incomplete upload. The successfully stored
+    // Telegram part indexes live in partMap, so the browser only resends gaps.
+    const recentFiles = await ctx.db
+      .query("files")
+      .withIndex("by_user_folder", (q) =>
+        q.eq("userId", userId).eq("folderId", folderId),
+      )
+      .order("desc")
+      .take(50);
+    const pending = recentFiles.find((file) =>
+      file.status === "uploading" &&
+      file.name === cleanedName &&
+      file.size === bytes &&
+      file.mimeType === normalizedMimeType &&
+      (file.chunkBytes ?? CHUNK_BYTES) === CHUNK_BYTES &&
+      file.chunkCount === chunkCount,
+    );
+    if (pending) {
+      return {
+        fileId: pending._id,
+        chunkCount: pending.chunkCount,
+        uploadedIndexes: Object.keys(pending.partMap ?? {})
+          .map(Number)
+          .filter((index) => Number.isInteger(index) && index >= 0 && index < pending.chunkCount)
+          .sort((a, b) => a - b),
+        resumed: true,
+      };
+    }
+
     const fileId = await ctx.db.insert("files", {
-      name: cleanName(name),
+      name: cleanedName,
       size: bytes,
-      mimeType: mimeType || "application/octet-stream",
+      mimeType: normalizedMimeType,
       folderId,
       userId,
       createdAt: Date.now(),
@@ -255,7 +293,7 @@ export const createFile = mutation({
       chunkBytes: CHUNK_BYTES,
       parts: [],
     });
-    return { fileId, chunkCount };
+    return { fileId, chunkCount, uploadedIndexes: [], resumed: false };
   },
 });
 
