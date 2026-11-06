@@ -8,7 +8,9 @@ import { AlertTriangle, CheckCircle2, Loader2, X } from "lucide-react";
 function statusLine(entry: UploadState): string {
   switch (entry.phase) {
     case "uploading":
-      return `Packing part ${Math.min(entry.chunkIndex + 1, entry.chunkCount)} of ${entry.chunkCount}`;
+      return entry.resumed && entry.loaded > 0
+        ? `Resuming · part ${Math.min(entry.chunkIndex + 1, entry.chunkCount)} of ${entry.chunkCount}`
+        : `Packing part ${Math.min(entry.chunkIndex + 1, entry.chunkCount)} of ${entry.chunkCount}`;
     case "storing":
       return "Sending to Telegram…";
     case "done":
@@ -96,7 +98,7 @@ export function UploadQueue({
                   />
                 )}
                 <p className="truncate text-xs text-muted-foreground">
-                  {failed ? "Removed from the vault" : statusLine(entry)}
+                  {failed ? "Saved parts kept — select this file again to resume" : statusLine(entry)}
                   {!failed && entry.size > 0
                     ? ` · ${formatBytes(entry.loaded)} / ${formatBytes(entry.size)}`
                     : ""}
