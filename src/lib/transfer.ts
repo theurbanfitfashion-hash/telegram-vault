@@ -103,6 +103,7 @@ export function useTransfer() {
       size: file.size,
       mimeType: file.type || "application/octet-stream",
       folderId,
+      sourceLastModified: file.lastModified,
     });
     const connection = (navigator as Navigator & {
       connection?: { effectiveType?: string; saveData?: boolean };
