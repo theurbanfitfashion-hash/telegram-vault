@@ -236,6 +236,7 @@ export const createFile = mutation({
     size: v.number(),
     mimeType: v.string(),
     folderId: v.union(v.id("folders"), v.null()),
+    sourceLastModified: v.number(),
   },
   returns: v.object({
     fileId: v.id("files"),
@@ -243,7 +244,7 @@ export const createFile = mutation({
     uploadedIndexes: v.array(v.number()),
     resumed: v.boolean(),
   }),
-  handler: async (ctx, { name, size, mimeType, folderId }) => {
+  handler: async (ctx, { name, size, mimeType, folderId, sourceLastModified }) => {
     const userId = await requireUser(ctx);
     if (folderId !== null) await getOwnedFolder(ctx, userId, folderId);
     if (!Number.isFinite(size) || size < 0) throw new Error("Invalid file size.");
@@ -266,6 +267,7 @@ export const createFile = mutation({
       file.name === cleanedName &&
       file.size === bytes &&
       file.mimeType === normalizedMimeType &&
+      file.sourceLastModified === sourceLastModified &&
       (file.chunkBytes ?? CHUNK_BYTES) === CHUNK_BYTES &&
       file.chunkCount === chunkCount,
     );
@@ -291,6 +293,7 @@ export const createFile = mutation({
       status: "uploading",
       chunkCount,
       chunkBytes: CHUNK_BYTES,
+      sourceLastModified,
       parts: [],
     });
     return { fileId, chunkCount, uploadedIndexes: [], resumed: false };
