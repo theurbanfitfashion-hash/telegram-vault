@@ -15,6 +15,7 @@ export interface UploadState {
   workerIndex: number;
   workerCount: number;
   phase: "uploading" | "storing" | "done" | "error";
+  resumed?: boolean;
   error?: string;
 }
 
@@ -97,7 +98,7 @@ export function useTransfer() {
     onPatch: (patch: UploadPatch, workerIndex: number) => void;
   }): Promise<Id<"files">> {
     const name = file.name.slice(0, MAX_NAME_LENGTH) || "untitled";
-    const { fileId, chunkCount } = await createFile({
+    const { fileId, chunkCount, uploadedIndexes, resumed } = await createFile({
       name,
       size: file.size,
       mimeType: file.type || "application/octet-stream",
@@ -114,7 +115,16 @@ export function useTransfer() {
           ? 2
           : 3;
     const concurrency = Math.min(maxWorkers, chunkCount);
-    const confirmedBytes = Array.from({ length: concurrency }, () => 0);
+    const completed = new Set(uploadedIndexes);
+    const confirmedBytes = Array.from({ length: concurrency }, (_, workerIndex) => {
+      let total = 0;
+      for (const index of completed) {
+        if (index % concurrency === workerIndex) {
+          total += Math.min(CHUNK_BYTES, file.size - index * CHUNK_BYTES);
+        }
+      }
+      return total;
+    });
     const estimatedLoaded = Array.from({ length: concurrency }, () => 0);
     const inFlightProgress = new Map<number, number>();
     const workerSize = (workerIndex: number) => {
@@ -127,7 +137,7 @@ export function useTransfer() {
     for (let workerIndex = 0; workerIndex < concurrency; workerIndex++) {
       onPatch({
         fileId, name, size: workerSize(workerIndex), chunkCount,
-        workerIndex, workerCount: concurrency, loaded: 0,
+        workerIndex, workerCount: concurrency, loaded: confirmedBytes[workerIndex], resumed,
       }, workerIndex);
     }
     const reportProgress = (workerIndex: number) => {
@@ -183,6 +193,7 @@ export function useTransfer() {
 
       const worker = async (workerIndex: number) => {
         for (let index = workerIndex; index < chunkCount; index += concurrency) {
+          if (completed.has(index)) continue;
           await uploadPart(index, workerIndex);
         }
       };
@@ -200,8 +211,8 @@ export function useTransfer() {
       }
       return fileId;
     } catch (error) {
-      // Never leave a half-written record (or its parts) behind.
-      await removeFile({ fileId }).catch(() => {});
+      // Keep completed Telegram parts indexed in Convex. Selecting the same
+      // file again resumes at the missing indexes instead of starting over.
       throw error;
     }
   }
