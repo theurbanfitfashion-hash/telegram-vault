@@ -59,6 +59,8 @@ const schema = defineSchema(
        * existed were chunked with the current default.
        */
       chunkBytes: v.optional(v.number()),
+      /** Browser file timestamp used to match a reselected file for resume. */
+      sourceLastModified: v.optional(v.number()),
       /** Telegram file_id (+ message id for clean-up) for each part, in order. */
       parts: v.array(
         v.object({
