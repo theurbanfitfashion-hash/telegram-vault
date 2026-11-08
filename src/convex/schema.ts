@@ -122,6 +122,15 @@ const schema = defineSchema(
     })
       .index("by_token", ["token"])
       .index("by_user_expiry", ["userId", "expiresAt"]),
+
+    uploadTokens: defineTable({
+      token: v.string(),
+      fileId: v.id("files"),
+      userId: v.id("users"),
+      expiresAt: v.number(),
+    })
+      .index("by_token", ["token"])
+      .index("by_user_expiry", ["userId", "expiresAt"]),
   },
   {
     schemaValidation: false,
