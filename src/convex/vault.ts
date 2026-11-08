@@ -300,17 +300,25 @@ export const createFile = mutation({
   },
 });
 
-export const getChunkUploadUrl = mutation({
-  args: { fileId: v.id("files"), index: v.number() },
-  handler: async (ctx, { fileId, index }) => {
+/** Mints a short-lived bearer token for direct chunk uploads. */
+export const createDirectUploadToken = mutation({
+  args: { fileId: v.id("files") },
+  returns: v.string(),
+  handler: async (ctx, { fileId }) => {
     const userId = await requireUser(ctx);
     const file = await ctx.db.get(fileId);
     if (!file || file.userId !== userId) throw new Error("Upload not found.");
     if (file.status !== "uploading") throw new Error("Upload already finished.");
-    if (index < 0 || index >= file.chunkCount) {
-      throw new Error("That part is out of range.");
-    }
-    return await ctx.storage.generateUploadUrl();
+    const now = Date.now();
+    const stale = await ctx.db.query("uploadTokens")
+      .withIndex("by_user_expiry", (q) => q.eq("userId", userId).lt("expiresAt", now))
+      .take(25);
+    for (const record of stale) await ctx.db.delete(record._id);
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    const token = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    await ctx.db.insert("uploadTokens", { token, fileId, userId, expiresAt: now + 60 * 60 * 1000 });
+    return token;
   },
 });
 
@@ -430,6 +438,48 @@ export const getFileForUpload = internalQuery({
       name: file.name,
       chunkCount: file.chunkCount,
       status: file.status,
+    };
+  },
+});
+
+/** Resolves an upload token to the server-only Telegram credentials. */
+export const resolveDirectUpload = internalQuery({
+  args: { token: v.string(), index: v.number() },
+  returns: v.union(
+    v.object({
+      fileId: v.id("files"),
+      fileName: v.string(),
+      chunkCount: v.number(),
+      expectedBytes: v.number(),
+      botToken: v.string(),
+      chatId: v.string(),
+    }),
+    v.null(),
+  ),
+  handler: async (ctx, { token, index }) => {
+    const record = await ctx.db.query("uploadTokens")
+      .withIndex("by_token", (q) => q.eq("token", token)).unique();
+    if (!record || record.expiresAt < Date.now()) return null;
+    const file = await ctx.db.get(record.fileId);
+    if (!file || file.userId !== record.userId || file.status !== "uploading") return null;
+    if (!Number.isInteger(index) || index < 0 || index >= file.chunkCount) return null;
+    const config = await ctx.db.query("telegramConfig")
+      .withIndex("by_user", (q) => q.eq("userId", record.userId)).unique();
+    if (!config?.botToken) return null;
+    const bot = config.botId
+      ? await ctx.db.query("telegramBots").withIndex("by_bot_id", (q) => q.eq("botId", config.botId!)).unique()
+      : null;
+    const botToken = bot?.botToken ?? config.botToken;
+    const chatId = bot?.chatId ?? config.chatId;
+    if (!botToken || !chatId) return null;
+    const chunkBytes = file.chunkBytes ?? CHUNK_BYTES;
+    return {
+      fileId: file._id,
+      fileName: file.name,
+      chunkCount: file.chunkCount,
+      expectedBytes: Math.min(chunkBytes, file.size - index * chunkBytes),
+      botToken,
+      chatId,
     };
   },
 });
