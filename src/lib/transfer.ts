@@ -109,12 +109,13 @@ export function useTransfer() {
       connection?: { effectiveType?: string; saveData?: boolean };
     }).connection;
     const effectiveType = connection?.effectiveType;
+    // Keep three parallel part pipelines on ordinary connections.
+    // The browser's "3g" estimate is frequently conservative on Wi-Fi/mobile
+    // networks and was unnecessarily limiting uploads to two workers.
     const maxWorkers =
       connection?.saveData || effectiveType === "slow-2g" || effectiveType === "2g"
         ? 1
-        : effectiveType === "3g"
-          ? 2
-          : 3;
+        : 3;
     const concurrency = Math.min(maxWorkers, chunkCount);
     const completed = new Set(uploadedIndexes);
     const confirmedBytes = Array.from({ length: concurrency }, (_, workerIndex) => {
