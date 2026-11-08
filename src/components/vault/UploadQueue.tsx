@@ -10,7 +10,7 @@ function statusLine(entry: UploadState): string {
     case "uploading":
       return entry.resumed && entry.loaded > 0
         ? `Resuming · part ${Math.min(entry.chunkIndex + 1, entry.chunkCount)} of ${entry.chunkCount}`
-        : `Packing part ${Math.min(entry.chunkIndex + 1, entry.chunkCount)} of ${entry.chunkCount}`;
+        : `Uploading part ${Math.min(entry.chunkIndex + 1, entry.chunkCount)} of ${entry.chunkCount}`;
     case "storing":
       return "Sending to Telegram…";
     case "done":
