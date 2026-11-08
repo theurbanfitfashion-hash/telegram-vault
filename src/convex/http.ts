@@ -15,7 +15,7 @@ auth.addHttpRoutes(http);
  */
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, HEAD, POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Range",
   "Access-Control-Expose-Headers": "Accept-Ranges, Content-Length, Content-Range, Content-Disposition",
 };
@@ -365,41 +365,6 @@ const downloadPart = httpAction(async (ctx, request) => {
   });
 });
 
-const directUpload = httpAction(async (ctx, request) => {
-  try {
-    const [, route, token, rawIndex] = new URL(request.url).pathname.split("/");
-    const index = Number(rawIndex);
-    if (route !== "upload" || !token || !Number.isInteger(index) || index < 0) return textResponse(400, "Invalid upload path.");
-    const upload = await ctx.runQuery(internal.vault.resolveDirectUpload, { token, index });
-    if (!upload) return textResponse(410, "Upload session expired. Please retry.");
-    const blob = await request.blob();
-    if (blob.size !== upload.expectedBytes) return textResponse(400, `Invalid part size: expected ${upload.expectedBytes}, received ${blob.size}.`);
-    const form = new FormData();
-    form.append("chat_id", upload.chatId);
-    form.append("disable_notification", "true");
-    form.append("document", blob, `${upload.fileName}.part-${index + 1}-of-${upload.chunkCount}`);
-    let data: any = null;
-    let response: Response | null = null;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      if (attempt) await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
-      response = await fetch(`https://api.telegram.org/bot${upload.botToken}/sendDocument`, { method: "POST", body: form });
-      data = await response.json().catch(() => null);
-      if (data?.ok) break;
-      if (response.status < 500 && response.status !== 429) return textResponse(502, data?.description ?? "Telegram rejected this part.");
-      if (response.status === 429) await new Promise((resolve) => setTimeout(resolve, 2500));
-    }
-    const message = data?.result;
-    const telegramFileId = message?.document?.file_id ?? message?.audio?.file_id ?? message?.video?.file_id ??
-      message?.animation?.file_id ?? message?.voice?.file_id ?? message?.video_note?.file_id ??
-      message?.photo?.[message.photo.length - 1]?.file_id;
-    if (!response?.ok || !data?.ok || !telegramFileId || !message?.message_id) return textResponse(502, data?.description ?? "Telegram did not confirm this part.");
-    await ctx.runMutation(internal.vault.recordPart, { fileId: upload.fileId, index, telegramFileId, messageId: message.message_id });
-    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "no-store" } });
-  } catch (error) {
-    return textResponse(500, error instanceof Error ? error.message : "Unexpected upload error.");
-  }
-});
-
 const healthCheck = httpAction(async () => {
   return new Response("telegram-vault-file-endpoint-ok", {
     status: 200,
@@ -416,8 +381,6 @@ const corsPreflight = httpAction(async () => {
 });
 
 http.route({ path: "/health", method: "GET", handler: healthCheck });
-http.route({ pathPrefix: "/upload/", method: "POST", handler: directUpload });
-http.route({ pathPrefix: "/upload/", method: "OPTIONS", handler: corsPreflight });
 http.route({ path: "/health", method: "OPTIONS", handler: corsPreflight });
 
 // Convex supports exact paths and path prefixes, not Express-style ":param"
