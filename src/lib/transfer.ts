@@ -33,17 +33,38 @@ interface SaveFilePicker {
   }>;
 }
 
-/** Sends one chunk directly to the protected Convex-to-Telegram endpoint. */
-function postSlice(url: string, slice: Blob, onLoaded: (loaded: number) => void): Promise<void> {
+/** POSTs one part straight into Convex storage, reporting byte progress. */
+function postSlice(
+  url: string,
+  slice: Blob,
+  onLoaded: (loaded: number) => void,
+): Promise<Id<"_storage">> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open("POST", url);
-    request.setRequestHeader("Content-Type", "application/octet-stream");
-    request.upload.onprogress = (event) => { if (event.lengthComputable) onLoaded(event.loaded); };
-    request.onload = () => request.status >= 200 && request.status < 300
-      ? resolve()
-      : reject(new Error(request.responseText || `Telegram upload failed (${request.status}).`));
-    request.onerror = () => reject(new Error("Network error while uploading — check your connection."));
+    request.setRequestHeader(
+      "Content-Type",
+      slice.type || "application/octet-stream",
+    );
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable) onLoaded(event.loaded);
+    };
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) {
+        try {
+          const { storageId } = JSON.parse(request.responseText) as {
+            storageId: string;
+          };
+          resolve(storageId as Id<"_storage">);
+        } catch {
+          reject(new Error("The upload finished with an unexpected response."));
+        }
+      } else {
+        reject(new Error(`Storage rejected the upload (${request.status}).`));
+      }
+    };
+    request.onerror = () =>
+      reject(new Error("Network error while uploading — check your connection."));
     request.onabort = () => reject(new Error("Upload interrupted."));
     request.send(slice);
   });
@@ -61,9 +82,10 @@ async function readErrorMessage(response: Response): Promise<string> {
  */
 export function useTransfer() {
   const createFile = useMutation(api.vault.createFile);
-  const createDirectUploadToken = useMutation(api.vault.createDirectUploadToken);
+  const getChunkUploadUrl = useMutation(api.vault.getChunkUploadUrl);
   const finishUpload = useMutation(api.vault.finishUpload);
   const createDownloadToken = useMutation(api.vault.createDownloadToken);
+  const sendChunk = useAction(api.telegram.sendChunk);
   const removeFile = useAction(api.telegram.removeFile);
 
   async function uploadFile({
@@ -83,9 +105,6 @@ export function useTransfer() {
       folderId,
       sourceLastModified: file.lastModified,
     });
-    const uploadToken = await createDirectUploadToken({ fileId });
-    const uploadSite = convexSiteUrl();
-    if (!uploadSite) throw new Error("This deployment has no upload endpoint.");
     const connection = (navigator as Navigator & {
       connection?: { effectiveType?: string; saveData?: boolean };
     }).connection;
@@ -140,25 +159,35 @@ export function useTransfer() {
         const slice = file.slice(start, Math.min(start + CHUNK_BYTES, file.size));
         onPatch({ phase: "uploading", chunkIndex: index }, workerIndex);
 
+        let storageId: Id<"_storage"> | null = null;
         let lastError: unknown;
+        // Large uploads can lose an individual XHR while another worker is
+        // active. Retry this indexed part before failing the whole file.
         for (let attempt = 0; attempt < 4; attempt++) {
           try {
-            await postSlice(`${uploadSite}/upload/${uploadToken}/${index}`, slice, (loaded) => {
+            const uploadUrl = await getChunkUploadUrl({ fileId, index });
+            storageId = await postSlice(uploadUrl, slice, (loaded) => {
               onPatch({ phase: "uploading", chunkIndex: index }, workerIndex);
               inFlightProgress.set(workerIndex, Math.min(loaded, slice.size));
               reportProgress(workerIndex);
             });
-            lastError = undefined;
             break;
           } catch (error) {
             lastError = error;
             const message = error instanceof Error ? error.message : "";
-            if (/Invalid part size|Invalid upload path|session expired|Telegram rejected/i.test(message) || attempt === 3) throw error;
+            const permanent = /Storage rejected the upload \(4\d\d\)/.test(message);
+            if (permanent || attempt === 3) throw error;
             inFlightProgress.set(workerIndex, 0);
             await new Promise((resolve) => window.setTimeout(resolve, 1000 * 2 ** attempt));
           }
         }
-        if (lastError) throw lastError;
+        if (!storageId) throw lastError instanceof Error ? lastError : new Error("Chunk upload failed.");
+
+        onPatch({ phase: "storing", chunkIndex: index }, workerIndex);
+        inFlightProgress.set(workerIndex, slice.size);
+        reportProgress(workerIndex);
+        await sendChunk({ fileId, index, storageId });
+
         inFlightProgress.delete(workerIndex);
         confirmedBytes[workerIndex] += slice.size;
         reportProgress(workerIndex);
