@@ -1,4 +1,5 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { internal } from "./_generated/api";
 import { ConvexError, v } from "convex/values";
 import {
   CHUNK_BYTES,
@@ -29,7 +30,12 @@ async function requireUser(
     .query("guestVaultLinks")
     .withIndex("by_auth_user", (q) => q.eq("authUserId", authUserId))
     .unique();
-  return link?.vaultUserId ?? authUserId;
+  const vaultUserId = link?.vaultUserId ?? authUserId;
+  const vaultUser = await ctx.db.get(vaultUserId);
+  if (vaultUser?.resetting === true) {
+    throw new ConvexError("Your account reset is still in progress. Please wait a moment.");
+  }
+  return vaultUserId;
 }
 
 /** Normalises user-supplied names: trimmed, flat, bounded. */
@@ -82,6 +88,11 @@ async function getOwnedFolder(
 export const resolveGuestBotVault = internalMutation({
   args: { botId: v.string(), botToken: v.string(), botUsername: v.string() },
   handler: async (ctx, { botId, botToken, botUsername }) => {
+    const claimedBot = await ctx.db.query("telegramBotOwners")
+      .withIndex("by_bot_id", (q) => q.eq("botId", botId)).unique();
+    if (claimedBot) {
+      throw new ConvexError("This bot is reserved for a Google/email account. Sign in with that account instead of guest login.");
+    }
     const existing = await ctx.db
       .query("guestBotVaults")
       .withIndex("by_bot_id", (q) => q.eq("botId", botId))
@@ -104,10 +115,10 @@ export const resolveGuestBotVault = internalMutation({
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .unique();
     if (config) {
-      await ctx.db.patch(config._id, { botToken, botUsername, updatedAt: Date.now() });
+      await ctx.db.patch(config._id, { botId, botToken, botUsername, updatedAt: Date.now() });
     } else {
       await ctx.db.insert("telegramConfig", {
-        userId, botToken, botUsername, updatedAt: Date.now(),
+        userId, botId, botToken, botUsername, updatedAt: Date.now(),
       });
     }
     return userId;
@@ -127,7 +138,12 @@ export const resolveVaultUserId = internalQuery({
       .query("guestVaultLinks")
       .withIndex("by_auth_user", (q) => q.eq("authUserId", userId))
       .unique();
-    return link?.vaultUserId ?? userId;
+    const vaultUserId = link?.vaultUserId ?? userId;
+    const vaultUser = await ctx.db.get(vaultUserId);
+    if (vaultUser?.resetting === true) {
+      throw new ConvexError("Your account reset is still in progress. Please wait a moment.");
+    }
+    return vaultUserId;
   },
 });
 
@@ -179,64 +195,81 @@ export const linkGuestVault = mutation({
     if (!authUser || authUser.isAnonymous === true || !authUser.email || authUser.emailVerificationTime === undefined) {
       throw new ConvexError("Use a verified Google or email account to link this vault.");
     }
-    // Never make an existing personal Google/email vault appear to disappear.
-    // Linking is allowed only when the destination identity has no vault data.
-    const destinationFiles = await ctx.db
-      .query("files")
-      .withIndex("by_user", (q) => q.eq("userId", authUserId))
-      .take(1);
-    const destinationFolders = await ctx.db
-      .query("folders")
-      .withIndex("by_user", (q) => q.eq("userId", authUserId))
-      .take(1);
-    const destinationConfig = await ctx.db
-      .query("telegramConfig")
-      .withIndex("by_user", (q) => q.eq("userId", authUserId))
-      .unique();
-    const destinationGuestVault = await ctx.db
-      .query("guestBotVaults")
-      .withIndex("by_user", (q) => q.eq("userId", authUserId))
-      .unique();
-    const destinationUploadTokens = await ctx.db
-      .query("uploadTokens")
-      .withIndex("by_user_expiry", (q) => q.eq("userId", authUserId))
-      .take(1);
-    const destinationDownloadTokens = await ctx.db
-      .query("downloadTokens")
-      .withIndex("by_user_expiry", (q) => q.eq("userId", authUserId))
-      .take(1);
-    if (
-      destinationFiles.length ||
-      destinationFolders.length ||
-      destinationConfig ||
-      destinationGuestVault ||
-      destinationUploadTokens.length ||
-      destinationDownloadTokens.length
-    ) {
-      throw new ConvexError("This Google/email account already has vault data. It cannot be linked without a separate safe merge.");
-    }
     if (!/^[a-f0-9]{64}$/.test(code)) throw new ConvexError("Enter the complete 64-character linking code.");
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code));
     const codeHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-    const guestVault = await ctx.db
-      .query("guestBotVaults")
-      .withIndex("by_link_code_hash", (q) => q.eq("linkCodeHash", codeHash))
-      .unique();
+    const guestVault = await ctx.db.query("guestBotVaults")
+      .withIndex("by_link_code_hash", (q) => q.eq("linkCodeHash", codeHash)).unique();
     if (!guestVault || !guestVault.linkCodeExpiresAt || guestVault.linkCodeExpiresAt <= Date.now()) {
       throw new ConvexError("This linking code is invalid or expired. Generate a new code from your guest login.");
     }
     if (guestVault.userId === authUserId) throw new ConvexError("This account is already the guest vault owner.");
-    const existingAuthLink = await ctx.db
-      .query("guestVaultLinks")
-      .withIndex("by_auth_user", (q) => q.eq("authUserId", authUserId))
-      .unique();
+
+    const existingAuthLink = await ctx.db.query("guestVaultLinks")
+      .withIndex("by_auth_user", (q) => q.eq("authUserId", authUserId)).unique();
     if (existingAuthLink) throw new ConvexError("This Google/email account is already linked to a guest vault.");
-    const existingVaultLink = await ctx.db
-      .query("guestVaultLinks")
-      .withIndex("by_vault_user", (q) => q.eq("vaultUserId", guestVault.userId))
-      .unique();
+    const existingVaultLink = await ctx.db.query("guestVaultLinks")
+      .withIndex("by_vault_user", (q) => q.eq("vaultUserId", guestVault.userId)).unique();
     if (existingVaultLink) throw new ConvexError("This guest vault is already linked to another sign-in account.");
 
+    const destinationFiles = await ctx.db.query("files")
+      .withIndex("by_user", (q) => q.eq("userId", authUserId)).take(1);
+    const destinationFolders = await ctx.db.query("folders")
+      .withIndex("by_user", (q) => q.eq("userId", authUserId)).take(1);
+    const destinationUploadTokens = await ctx.db.query("uploadTokens")
+      .withIndex("by_user_expiry", (q) => q.eq("userId", authUserId)).take(1);
+    const destinationDownloadTokens = await ctx.db.query("downloadTokens")
+      .withIndex("by_user_expiry", (q) => q.eq("userId", authUserId)).take(1);
+    const destinationGuestVault = await ctx.db.query("guestBotVaults")
+      .withIndex("by_user", (q) => q.eq("userId", authUserId)).unique();
+    const destinationConfig = await ctx.db.query("telegramConfig")
+      .withIndex("by_user", (q) => q.eq("userId", authUserId)).unique();
+
+    if (destinationFiles.length || destinationFolders.length ||
+        destinationUploadTokens.length || destinationDownloadTokens.length ||
+        destinationGuestVault) {
+      throw new ConvexError("This Google/email account already has vault data. It cannot be linked without a separate safe merge.");
+    }
+    if (destinationConfig && destinationConfig.botId !== guestVault.botId) {
+      throw new ConvexError("This Google/email account has a different bot connected. No data was changed.");
+    }
+
+    const accountBots = await ctx.db.query("telegramBotOwners")
+      .withIndex("by_owner_user", (q) => q.eq("ownerUserId", authUserId)).take(1);
+    if (accountBots.some((record) => record.botId !== guestVault.botId)) {
+      throw new ConvexError("This Google/email account already owns a different Telegram bot.");
+    }
+    const botOwner = await ctx.db.query("telegramBotOwners")
+      .withIndex("by_bot_id", (q) => q.eq("botId", guestVault.botId)).unique();
+    if (botOwner?.ownerUserId && botOwner.ownerUserId !== authUserId) {
+      throw new ConvexError("This Telegram bot is already connected to another Google/email account.");
+    }
+
+    const guestConfig = await ctx.db.query("telegramConfig")
+      .withIndex("by_user", (q) => q.eq("userId", guestVault.userId)).unique();
+    if (!guestConfig) {
+      throw new ConvexError("The original guest vault connection is incomplete. Contact support before linking; no data was changed.");
+    }
+    if (guestConfig.botId && guestConfig.botId !== guestVault.botId) {
+      throw new ConvexError("The guest vault's saved bot does not match its registered bot identity.");
+    }
+
+    if (destinationConfig) await ctx.db.delete(destinationConfig._id);
+    await ctx.db.patch(guestConfig._id, { botId: guestVault.botId, updatedAt: Date.now() });
+    if (botOwner) {
+      await ctx.db.patch(botOwner._id, {
+        ownerUserId: authUserId,
+        releasedAt: undefined,
+        updatedAt: Date.now(),
+      });
+    } else {
+      await ctx.db.insert("telegramBotOwners", {
+        botId: guestVault.botId,
+        ownerUserId: authUserId,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    }
     await ctx.db.insert("guestVaultLinks", {
       authUserId,
       vaultUserId: guestVault.userId,
@@ -263,6 +296,123 @@ export const getGuestVaultLinkStatus = query({
       .withIndex("by_auth_user", (q) => q.eq("authUserId", authUserId))
       .unique();
     return { linked: link !== null };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Account reset
+// ---------------------------------------------------------------------------
+
+/** Reports reset progress without exposing any private account data. */
+export const getAccountResetStatus = query({
+  args: {},
+  returns: v.object({ isResetting: v.boolean() }),
+  handler: async (ctx) => {
+    const authUserId = await getAuthUserId(ctx);
+    if (authUserId === null) return { isResetting: false };
+    const authUser = await ctx.db.get(authUserId);
+    if (!authUser || authUser.isAnonymous === true || !authUser.email || authUser.emailVerificationTime === undefined) {
+      return { isResetting: false };
+    }
+    const link = await ctx.db.query("guestVaultLinks")
+      .withIndex("by_auth_user", (q) => q.eq("authUserId", authUserId)).unique();
+    const vaultUser = await ctx.db.get(link?.vaultUserId ?? authUserId);
+    return { isResetting: vaultUser?.resetting === true };
+  },
+});
+
+/** Starts a resumable reset. Telegram messages are deliberately not deleted. */
+export const beginAccountReset = mutation({
+  args: {},
+  returns: v.object({ started: v.boolean() }),
+  handler: async (ctx) => {
+    const authUserId = await getAuthUserId(ctx);
+    if (authUserId === null) throw new ConvexError("Sign in before resetting your account.");
+    const authUser = await ctx.db.get(authUserId);
+    if (!authUser || authUser.isAnonymous === true || !authUser.email || authUser.emailVerificationTime === undefined) {
+      throw new ConvexError("Account reset is available only to a verified Google/email account.");
+    }
+    const link = await ctx.db.query("guestVaultLinks")
+      .withIndex("by_auth_user", (q) => q.eq("authUserId", authUserId)).unique();
+    const vaultUserId = link?.vaultUserId ?? authUserId;
+    const vaultUser = await ctx.db.get(vaultUserId);
+    if (!vaultUser) throw new ConvexError("Your vault account could not be found.");
+    if (vaultUser.resetting === true) return { started: true };
+    await ctx.db.patch(vaultUserId, { resetting: true });
+    await ctx.scheduler.runAfter(0, internal.vault.continueAccountReset, { authUserId, vaultUserId });
+    return { started: true };
+  },
+});
+
+/** Deletes metadata in bounded batches so large vaults can reset safely. */
+export const continueAccountReset = internalMutation({
+  args: {
+    authUserId: v.id("users"),
+    vaultUserId: v.id("users"),
+  },
+  returns: v.null(),
+  handler: async (ctx, { authUserId, vaultUserId }) => {
+    const vaultUser = await ctx.db.get(vaultUserId);
+    if (!vaultUser || vaultUser.resetting !== true) return null;
+
+    const files = await ctx.db.query("files")
+      .withIndex("by_user", (q) => q.eq("userId", vaultUserId)).take(100);
+    const folders = await ctx.db.query("folders")
+      .withIndex("by_user", (q) => q.eq("userId", vaultUserId)).take(100);
+    const uploads = await ctx.db.query("uploadTokens")
+      .withIndex("by_user_expiry", (q) => q.eq("userId", vaultUserId)).take(100);
+    const downloads = await ctx.db.query("downloadTokens")
+      .withIndex("by_user_expiry", (q) => q.eq("userId", vaultUserId)).take(100);
+
+    for (const file of files) await ctx.db.delete(file._id);
+    for (const folder of folders) await ctx.db.delete(folder._id);
+    for (const token of uploads) await ctx.db.delete(token._id);
+    for (const token of downloads) await ctx.db.delete(token._id);
+
+    if (files.length || folders.length || uploads.length || downloads.length) {
+      await ctx.scheduler.runAfter(0, internal.vault.continueAccountReset, { authUserId, vaultUserId });
+      return null;
+    }
+
+    const config = await ctx.db.query("telegramConfig")
+      .withIndex("by_user", (q) => q.eq("userId", vaultUserId)).unique();
+    const guestVault = await ctx.db.query("guestBotVaults")
+      .withIndex("by_user", (q) => q.eq("userId", vaultUserId)).unique();
+    const botId = config?.botId ?? guestVault?.botId;
+
+    if (botId) {
+      const owner = await ctx.db.query("telegramBotOwners")
+        .withIndex("by_bot_id", (q) => q.eq("botId", botId)).unique();
+      if (owner?.ownerUserId === authUserId) {
+        await ctx.db.patch(owner._id, {
+          ownerUserId: undefined,
+          releasedAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        const shared = await ctx.db.query("telegramBots")
+          .withIndex("by_bot_id", (q) => q.eq("botId", botId)).unique();
+        if (shared) await ctx.db.delete(shared._id);
+      } else if (!owner) {
+        const guestOwner = await ctx.db.query("guestBotVaults")
+          .withIndex("by_bot_id", (q) => q.eq("botId", botId)).unique();
+        if (!guestOwner || guestOwner.userId === vaultUserId) {
+          await ctx.db.insert("telegramBotOwners", {
+            botId,
+            releasedAt: Date.now(),
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          });
+          const shared = await ctx.db.query("telegramBots")
+            .withIndex("by_bot_id", (q) => q.eq("botId", botId)).unique();
+          if (shared) await ctx.db.delete(shared._id);
+        }
+      }
+    }
+
+    if (config) await ctx.db.delete(config._id);
+    if (guestVault) await ctx.db.delete(guestVault._id);
+    await ctx.db.patch(vaultUserId, { resetting: false });
+    return null;
   },
 });
 
@@ -746,10 +896,52 @@ export const saveTelegramConfig = internalMutation({
     resetChat: v.boolean(),
   },
   handler: async (ctx, { userId, botId, botToken, botUsername, resetChat }) => {
-    const existing = await ctx.db
-      .query("telegramConfig")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
-      .unique();
+    const user = await ctx.db.get(userId);
+    if (!user) throw new ConvexError("The vault account no longer exists.");
+    const existing = await ctx.db.query("telegramConfig")
+      .withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    const guestVault = await ctx.db.query("guestBotVaults")
+      .withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    const linkedIdentity = await ctx.db.query("guestVaultLinks")
+      .withIndex("by_vault_user", (q) => q.eq("vaultUserId", userId)).unique();
+    const accountOwnerId = linkedIdentity?.authUserId ??
+      (user.isAnonymous === true ? null : userId);
+    const currentBotId = existing?.botId ?? guestVault?.botId;
+    if (currentBotId && currentBotId !== botId) {
+      throw new ConvexError("This account already has a different Telegram bot. Use Reset Account before connecting another bot.");
+    }
+
+    const botOwner = await ctx.db.query("telegramBotOwners")
+      .withIndex("by_bot_id", (q) => q.eq("botId", botId)).unique();
+    if (accountOwnerId) {
+      const accountBots = await ctx.db.query("telegramBotOwners")
+        .withIndex("by_owner_user", (q) => q.eq("ownerUserId", accountOwnerId)).take(1);
+      if (accountBots.some((record) => record.botId !== botId)) {
+        throw new ConvexError("This Google/email account already has a different Telegram bot. Use Reset Account first.");
+      }
+      if (botOwner?.ownerUserId && botOwner.ownerUserId !== accountOwnerId) {
+        throw new ConvexError("This Telegram bot is already connected to another Google/email account.");
+      }
+      if (botOwner) {
+        await ctx.db.patch(botOwner._id, {
+          ownerUserId: accountOwnerId,
+          releasedAt: undefined,
+          updatedAt: Date.now(),
+        });
+      } else {
+        await ctx.db.insert("telegramBotOwners", {
+          botId,
+          ownerUserId: accountOwnerId,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+      }
+    } else if (botOwner) {
+      throw new ConvexError("This bot is reserved for a Google/email account. Sign in with that account instead of guest login.");
+    } else if (guestVault && guestVault.botId !== botId) {
+      throw new ConvexError("A guest vault cannot be moved to a different bot. Link it to a verified account first.");
+    }
+
     const botChanged =
       (existing?.botId !== undefined && existing.botId !== botId) ||
       (existing?.botUsername !== undefined && existing.botUsername !== botUsername);
@@ -771,23 +963,12 @@ export const saveTelegramConfig = internalMutation({
       });
     }
 
-    const shared = await ctx.db
-      .query("telegramBots")
-      .withIndex("by_bot_id", (q) => q.eq("botId", botId))
-      .unique();
+    const shared = await ctx.db.query("telegramBots")
+      .withIndex("by_bot_id", (q) => q.eq("botId", botId)).unique();
     if (shared) {
-      await ctx.db.patch(shared._id, {
-        botToken,
-        botUsername,
-        updatedAt: Date.now(),
-      });
+      await ctx.db.patch(shared._id, { botToken, botUsername, updatedAt: Date.now() });
     } else {
-      await ctx.db.insert("telegramBots", {
-        botId,
-        botToken,
-        botUsername,
-        updatedAt: Date.now(),
-      });
+      await ctx.db.insert("telegramBots", { botId, botToken, botUsername, updatedAt: Date.now() });
     }
   },
 });
