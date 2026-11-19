@@ -96,7 +96,7 @@ test("bot replacement verifies the new token and blocks accidental bot switching
 test("bot reset clears bounded batches of app metadata without deleting Telegram media", async () => {
   const vault = await read("../src/convex/vault.ts");
   const start = vault.indexOf("export const continueBotReset");
-  const end = vault.indexOf("// ---------------------------------------------------------------------------\\n// Reads", start);
+  const end = vault.indexOf("// ---------------------------------------------------------------------------\n// Reads", start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const reset = vault.slice(start, end);
