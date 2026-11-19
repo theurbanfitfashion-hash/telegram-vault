@@ -314,8 +314,17 @@ export function useTransfer() {
       }
     }
 
-    // Mobile browsers (including Android Chrome variants) should own the
-    // transfer: no giant in-memory Blob, and the file appears in Downloads.
+    // A single whole-file Worker response is capped by Cloudflare Free's
+    // 50 external subrequests. Modern Chromium on Android supports the save
+    // picker above, which streams each part in its own Worker request.
+    if (transferWorkerUrl && file.chunkCount > 24) {
+      throw new Error(
+        "This browser cannot save this large file directly to disk. Update to Chrome 132 or newer on Android, or use desktop Chrome/Edge, then try again.",
+      );
+    }
+
+    // Mobile browsers without the save picker can still use the native
+    // download manager for files that fit within one Free Worker invocation.
     const anchor = document.createElement("a");
     anchor.href = downloadUrl;
     anchor.download = file.name;
