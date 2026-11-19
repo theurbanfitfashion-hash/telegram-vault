@@ -167,8 +167,8 @@ async function resolveBot(
       token: candidate.token,
       botId,
       username: me.username,
-      chatId: shared?.chatId ?? config?.chatId,
-      chatTitle: shared?.chatTitle ?? config?.chatTitle,
+      chatId: shared?.chatVerified === true ? shared.chatId : undefined,
+      chatTitle: shared?.chatVerified === true ? shared.chatTitle : undefined,
     };
   }
   return null;
@@ -185,8 +185,8 @@ async function requireConnection(
   const shared = config?.botId
     ? await ctx.runQuery(internal.vault.getTelegramBotDoc, { botId: config.botId })
     : null;
-  const chatId = shared?.chatId ?? config?.chatId;
-  if (!chatId) throw new Error("Finish connecting: the bot owner must press Start once in the bot chat.");
+  const chatId = shared?.chatVerified === true ? shared.chatId : undefined;
+  if (!chatId) throw new Error("Reconnect your Telegram chat using the secure pairing link before transferring files.");
   return { token: shared?.botToken ?? token, chatId };
 }
 
