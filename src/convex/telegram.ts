@@ -120,10 +120,8 @@ async function requireUser(ctx: ActionCtx): Promise<Id<"users">> {
 }
 
 /**
- * Validates a token with `getMe` (network) and reports which bot + chat the
- * vault is wired to. Used by the connect screen, not on the transfer path.
- * An `TELEGRAM_BOT_TOKEN` env var is folded into the stored config here so the
- * rest of the app only ever has to look at one place.
+ * Validates the account's own saved token with `getMe` (network) and reports
+ * which bot + chat the vault is wired to.
  */
 async function resolveBot(
   ctx: ActionCtx,
