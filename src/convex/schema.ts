@@ -114,9 +114,25 @@ const schema = defineSchema(
       botId: v.string(),
       userId: v.id("users"),
       botUsername: v.string(),
+      // A short-lived, one-time code proves control of the original guest session.
+      linkCodeHash: v.optional(v.string()),
+      linkCodeExpiresAt: v.optional(v.number()),
       createdAt: v.number(),
       updatedAt: v.number(),
-    }).index("by_bot_id", ["botId"]),
+    })
+      .index("by_bot_id", ["botId"])
+      .index("by_user", ["userId"])
+      .index("by_link_code_hash", ["linkCodeHash"]),
+
+    // Maps a verified sign-in identity to the original guest vault owner.
+    // File/folder ownership is not copied or rewritten when an account is linked.
+    guestVaultLinks: defineTable({
+      authUserId: v.id("users"),
+      vaultUserId: v.id("users"),
+      createdAt: v.number(),
+    })
+      .index("by_auth_user", ["authUserId"])
+      .index("by_vault_user", ["vaultUserId"]),
 
     // Short-lived tokens that unlock a streamed download.
     downloadTokens: defineTable({
