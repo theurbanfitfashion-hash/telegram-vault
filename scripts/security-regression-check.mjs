@@ -126,3 +126,9 @@ test("dashboard surfaces bot ownership conflicts and provides a path to account 
   assert.match(dashboard, /setStatusError\(errorMessage\(error\)\)/);
   assert.match(dashboard, /navigate\("\/account"\)/);
 });
+
+test("legacy duplicate bot configurations are not auto-assigned to the first account that logs in", async () => {
+  const vault = await read("../src/convex/vault.ts");
+  assert.match(vault, /otherBotConfigs/);
+  assert.match(vault, /We won't choose an owner automatically/);
+});
