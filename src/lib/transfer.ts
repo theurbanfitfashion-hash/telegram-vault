@@ -70,6 +70,41 @@ function postSlice(
   });
 }
 
+/** Uploads a raw chunk to Cloudflare; the Worker forwards it to Telegram. */
+function postSliceToWorker(
+  url: string,
+  slice: Blob,
+  token: string,
+  onLoaded: (loaded: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", url);
+    request.setRequestHeader("Authorization", `Bearer ${token}`);
+    request.setRequestHeader("Content-Type", "application/octet-stream");
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable) onLoaded(event.loaded);
+    };
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) {
+        resolve();
+        return;
+      }
+      let message = `Transfer Worker rejected the upload (${request.status}).`;
+      try {
+        const result = JSON.parse(request.responseText) as { error?: string };
+        if (result.error) message = result.error;
+      } catch {
+        // Keep the status-based message when the Worker did not return JSON.
+      }
+      reject(new Error(message));
+    };
+    request.onerror = () => reject(new Error("Network error while uploading — check your connection."));
+    request.onabort = () => reject(new Error("Upload interrupted."));
+    request.send(slice);
+  });
+}
+
 async function readErrorMessage(response: Response): Promise<string> {
   if (response.status === 410) return "That download link expired — try again.";
   const text = await response.text().catch(() => "");
@@ -83,10 +118,14 @@ async function readErrorMessage(response: Response): Promise<string> {
 export function useTransfer() {
   const createFile = useMutation(api.vault.createFile);
   const getChunkUploadUrl = useMutation(api.vault.getChunkUploadUrl);
+  const createChunkTransferToken = useMutation(api.vault.createChunkTransferToken);
   const finishUpload = useMutation(api.vault.finishUpload);
   const createDownloadToken = useMutation(api.vault.createDownloadToken);
   const sendChunk = useAction(api.telegram.sendChunk);
   const removeFile = useAction(api.telegram.removeFile);
+  const transferWorkerUrl = (
+    import.meta.env as ImportMetaEnv & { VITE_TRANSFER_WORKER_URL?: string }
+  ).VITE_TRANSFER_WORKER_URL?.trim().replace(/\/+$/, "") ?? "";
 
   async function uploadFile({
     file,
@@ -159,34 +198,38 @@ export function useTransfer() {
         const slice = file.slice(start, Math.min(start + CHUNK_BYTES, file.size));
         onPatch({ phase: "uploading", chunkIndex: index }, workerIndex);
 
-        let storageId: Id<"_storage"> | null = null;
         let lastError: unknown;
-        // Large uploads can lose an individual XHR while another worker is
-        // active. Retry this indexed part before failing the whole file.
+        // Retry a failed indexed part before failing the whole file.
         for (let attempt = 0; attempt < 4; attempt++) {
           try {
-            const uploadUrl = await getChunkUploadUrl({ fileId, index });
-            storageId = await postSlice(uploadUrl, slice, (loaded) => {
-              onPatch({ phase: "uploading", chunkIndex: index }, workerIndex);
-              inFlightProgress.set(workerIndex, Math.min(loaded, slice.size));
+            if (transferWorkerUrl) {
+              const token = await createChunkTransferToken({ fileId, index });
+              await postSliceToWorker(`${transferWorkerUrl}/upload`, slice, token, (loaded) => {
+                onPatch({ phase: "uploading", chunkIndex: index }, workerIndex);
+                inFlightProgress.set(workerIndex, Math.min(loaded, slice.size));
+                reportProgress(workerIndex);
+              });
+            } else {
+              // Backward-compatible fallback until Cloudflare is configured.
+              const uploadUrl = await getChunkUploadUrl({ fileId, index });
+              const storageId = await postSlice(uploadUrl, slice, (loaded) => {
+                onPatch({ phase: "uploading", chunkIndex: index }, workerIndex);
+                inFlightProgress.set(workerIndex, Math.min(loaded, slice.size));
+                reportProgress(workerIndex);
+              });
+              onPatch({ phase: "storing", chunkIndex: index }, workerIndex);
+              inFlightProgress.set(workerIndex, slice.size);
               reportProgress(workerIndex);
-            });
+              await sendChunk({ fileId, index, storageId });
+            }
             break;
           } catch (error) {
             lastError = error;
-            const message = error instanceof Error ? error.message : "";
-            const permanent = /Storage rejected the upload \(4\d\d\)/.test(message);
-            if (permanent || attempt === 3) throw error;
+            if (attempt === 3) throw error;
             inFlightProgress.set(workerIndex, 0);
             await new Promise((resolve) => window.setTimeout(resolve, 1000 * 2 ** attempt));
           }
         }
-        if (!storageId) throw lastError instanceof Error ? lastError : new Error("Chunk upload failed.");
-
-        onPatch({ phase: "storing", chunkIndex: index }, workerIndex);
-        inFlightProgress.set(workerIndex, slice.size);
-        reportProgress(workerIndex);
-        await sendChunk({ fileId, index, storageId });
 
         inFlightProgress.delete(workerIndex);
         confirmedBytes[workerIndex] += slice.size;
@@ -224,7 +267,7 @@ export function useTransfer() {
     onProgress: (done: number, total: number) => void,
   ): Promise<void> {
     const token = await createDownloadToken({ fileId: file._id });
-    const site = convexSiteUrl();
+    const site = transferWorkerUrl || convexSiteUrl();
     if (!site) throw new Error("This deployment has no download endpoint.");
     const downloadUrl = `${site}/file/${token}?download=1`;
     const partUrl = (index: number) => `${site}/file/${token}/${index}`;
