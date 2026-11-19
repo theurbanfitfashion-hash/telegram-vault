@@ -378,7 +378,9 @@ export const continueAccountReset = internalMutation({
       .withIndex("by_user", (q) => q.eq("userId", vaultUserId)).unique();
     const guestVault = await ctx.db.query("guestBotVaults")
       .withIndex("by_user", (q) => q.eq("userId", vaultUserId)).unique();
-    const botId = config?.botId ?? guestVault?.botId;
+    const existingOwner = await ctx.db.query("telegramBotOwners")
+      .withIndex("by_owner_user", (q) => q.eq("ownerUserId", authUserId)).take(1);
+    const botId = config?.botId ?? guestVault?.botId ?? existingOwner[0]?.botId;
 
     if (botId) {
       const owner = await ctx.db.query("telegramBotOwners")
@@ -902,6 +904,11 @@ export const saveTelegramConfig = internalMutation({
       .withIndex("by_user", (q) => q.eq("userId", userId)).unique();
     const guestVault = await ctx.db.query("guestBotVaults")
       .withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    const legacyBotVault = await ctx.db.query("guestBotVaults")
+      .withIndex("by_bot_id", (q) => q.eq("botId", botId)).unique();
+    if (legacyBotVault && legacyBotVault.userId !== userId) {
+      throw new ConvexError("This bot already has an existing guest vault. Recover and link that vault before connecting it to this account.");
+    }
     const linkedIdentity = await ctx.db.query("guestVaultLinks")
       .withIndex("by_vault_user", (q) => q.eq("vaultUserId", userId)).unique();
     const accountOwnerId = linkedIdentity?.authUserId ??
