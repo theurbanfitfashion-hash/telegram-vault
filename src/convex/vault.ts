@@ -179,6 +179,23 @@ export const linkGuestVault = mutation({
     if (!authUser || authUser.isAnonymous === true || !authUser.email || authUser.emailVerificationTime === undefined) {
       throw new ConvexError("Use a verified Google or email account to link this vault.");
     }
+    // Never make an existing personal Google/email vault appear to disappear.
+    // Linking is allowed only when the destination identity has no vault data.
+    const destinationFiles = await ctx.db
+      .query("files")
+      .withIndex("by_user", (q) => q.eq("userId", authUserId))
+      .take(1);
+    const destinationFolders = await ctx.db
+      .query("folders")
+      .withIndex("by_user", (q) => q.eq("userId", authUserId))
+      .take(1);
+    const destinationConfig = await ctx.db
+      .query("telegramConfig")
+      .withIndex("by_user", (q) => q.eq("userId", authUserId))
+      .unique();
+    if (destinationFiles.length || destinationFolders.length || destinationConfig) {
+      throw new ConvexError("This Google/email account already has its own vault data. It cannot be linked without a separate safe merge.");
+    }
     if (!/^[a-f0-9]{64}$/.test(code)) throw new ConvexError("Enter the complete 64-character linking code.");
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code));
     const codeHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
