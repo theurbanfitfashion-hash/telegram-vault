@@ -167,9 +167,11 @@ const schema = defineSchema(
       token: v.string(),
       fileId: v.id("files"),
       userId: v.id("users"),
+      index: v.optional(v.number()),
       expiresAt: v.number(),
     })
       .index("by_token", ["token"])
+      .index("by_file_index", ["fileId", "index"])
       .index("by_user_expiry", ["userId", "expiresAt"]),
   },
   {
