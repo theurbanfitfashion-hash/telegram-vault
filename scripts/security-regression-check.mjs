@@ -54,7 +54,8 @@ test("guest vault link codes are high entropy, hashed, short-lived, and single-u
 test("vault and Telegram actions resolve linked identities to the original vault owner", async () => {
   const vault = await read("../src/convex/vault.ts");
   const telegram = await read("../src/convex/telegram.ts");
-  assert.match(vault, /const vaultUserId = link\?\.vaultUserId \?\? authUserId/);\n  assert.match(vault, /return vaultUserId/);
+  assert.match(vault, /const vaultUserId = link\?\.vaultUserId \?\? authUserId/);
+  assert.match(vault, /return vaultUserId/);
   assert.match(telegram, /internal\.vault\.resolveVaultUserId/);
 });
 
