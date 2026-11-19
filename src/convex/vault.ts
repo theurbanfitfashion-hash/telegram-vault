@@ -1,4 +1,5 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { internal } from "./_generated/api";
 import { ConvexError, v } from "convex/values";
 import {
   CHUNK_BYTES,
@@ -29,7 +30,12 @@ async function requireUser(
     .query("guestVaultLinks")
     .withIndex("by_auth_user", (q) => q.eq("authUserId", authUserId))
     .unique();
-  return link?.vaultUserId ?? authUserId;
+  const vaultUserId = link?.vaultUserId ?? authUserId;
+  const vaultUser = await ctx.db.get(vaultUserId);
+  if (vaultUser?.resetting === true) {
+    throw new ConvexError("Your vault is being reset. Please wait until the new bot is ready.");
+  }
+  return vaultUserId;
 }
 
 /** Normalises user-supplied names: trimmed, flat, bounded. */
@@ -127,7 +133,12 @@ export const resolveVaultUserId = internalQuery({
       .query("guestVaultLinks")
       .withIndex("by_auth_user", (q) => q.eq("authUserId", userId))
       .unique();
-    return link?.vaultUserId ?? userId;
+    const vaultUserId = link?.vaultUserId ?? userId;
+    const vaultUser = await ctx.db.get(vaultUserId);
+    if (vaultUser?.resetting === true) {
+      throw new ConvexError("Your vault is being reset. Please wait until the new bot is ready.");
+    }
+    return vaultUserId;
   },
 });
 
@@ -263,6 +274,176 @@ export const getGuestVaultLinkStatus = query({
       .withIndex("by_auth_user", (q) => q.eq("authUserId", authUserId))
       .unique();
     return { linked: link !== null };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Safe bot replacement
+// ---------------------------------------------------------------------------
+
+/** Reactive status used to keep the UI out of the vault during a reset. */
+export const getBotResetStatus = query({
+  args: {},
+  returns: v.boolean(),
+  handler: async (ctx) => {
+    const authUserId = await getAuthUserId(ctx);
+    if (authUserId === null) return false;
+    const link = await ctx.db
+      .query("guestVaultLinks")
+      .withIndex("by_auth_user", (q) => q.eq("authUserId", authUserId))
+      .unique();
+    const vaultUser = await ctx.db.get(link?.vaultUserId ?? authUserId);
+    return vaultUser?.resetting === true;
+  },
+});
+
+/** Starts a fresh-vault replacement after the Telegram token was verified. */
+export const beginBotReset = internalMutation({
+  args: {
+    userId: v.id("users"),
+    botId: v.string(),
+    botToken: v.string(),
+    botUsername: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, { userId, botId, botToken, botUsername }) => {
+    const user = await ctx.db.get(userId);
+    if (!user) throw new ConvexError("Your vault account could not be found.");
+    if (user.resetting === true) {
+      throw new ConvexError("A bot reset is already in progress.");
+    }
+
+    const config = await ctx.db.query("telegramConfig")
+      .withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    if (!config) throw new ConvexError("No existing Telegram bot connection was found to replace.");
+    const guestVault = await ctx.db.query("guestBotVaults")
+      .withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    const oldBotId = config.botId ?? guestVault?.botId;
+
+    // Never silently adopt a bot or guest vault already used by another account.
+    const otherConfigs = await ctx.db.query("telegramConfig")
+      .withIndex("by_bot_id", (q) => q.eq("botId", botId)).take(3);
+    if (otherConfigs.some((record) => record.userId !== userId)) {
+      throw new ConvexError("That bot is already connected to another vault. Choose a new bot token.");
+    }
+    const otherGuestVault = await ctx.db.query("guestBotVaults")
+      .withIndex("by_bot_id", (q) => q.eq("botId", botId)).unique();
+    if (otherGuestVault && otherGuestVault.userId !== userId) {
+      throw new ConvexError("That bot already has a guest vault. Choose a new bot token to keep vaults separate.");
+    }
+    const sharedNewBot = await ctx.db.query("telegramBots")
+      .withIndex("by_bot_id", (q) => q.eq("botId", botId)).unique();
+    if (sharedNewBot && botId !== oldBotId) {
+      throw new ConvexError("That bot already has a Telegram storage connection. Choose a new bot token.");
+    }
+
+    await ctx.db.patch(userId, { resetting: true });
+    await ctx.db.patch(config._id, {
+      pendingBotId: botId,
+      pendingBotToken: botToken,
+      pendingBotUsername: botUsername,
+      updatedAt: Date.now(),
+    });
+    await ctx.scheduler.runAfter(0, internal.vault.continueBotReset, { userId });
+    return null;
+  },
+});
+
+/** Clears only this vault's app metadata in bounded batches; Telegram messages remain untouched. */
+export const continueBotReset = internalMutation({
+  args: { userId: v.id("users") },
+  returns: v.null(),
+  handler: async (ctx, { userId }) => {
+    const user = await ctx.db.get(userId);
+    if (!user || user.resetting !== true) return null;
+
+    const files = await ctx.db.query("files")
+      .withIndex("by_user", (q) => q.eq("userId", userId)).take(100);
+    const folders = await ctx.db.query("folders")
+      .withIndex("by_user", (q) => q.eq("userId", userId)).take(100);
+    const uploads = await ctx.db.query("uploadTokens")
+      .withIndex("by_user_expiry", (q) => q.eq("userId", userId)).take(100);
+    const downloads = await ctx.db.query("downloadTokens")
+      .withIndex("by_user_expiry", (q) => q.eq("userId", userId)).take(100);
+
+    for (const file of files) await ctx.db.delete(file._id);
+    for (const folder of folders) await ctx.db.delete(folder._id);
+    for (const token of uploads) await ctx.db.delete(token._id);
+    for (const token of downloads) await ctx.db.delete(token._id);
+
+    if (files.length || folders.length || uploads.length || downloads.length) {
+      await ctx.scheduler.runAfter(0, internal.vault.continueBotReset, { userId });
+      return null;
+    }
+
+    const config = await ctx.db.query("telegramConfig")
+      .withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    if (!config?.pendingBotId || !config.pendingBotToken || !config.pendingBotUsername) {
+      await ctx.db.patch(userId, { resetting: false });
+      return null;
+    }
+
+    const oldBotId = config.botId;
+    const newBotId = config.pendingBotId;
+    const guestVault = await ctx.db.query("guestBotVaults")
+      .withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+
+    const newShared = await ctx.db.query("telegramBots")
+      .withIndex("by_bot_id", (q) => q.eq("botId", newBotId)).unique();
+    const sharedFields = {
+      botToken: config.pendingBotToken,
+      botUsername: config.pendingBotUsername,
+      chatId: undefined,
+      chatTitle: undefined,
+      chatVerified: false,
+      chatChallenge: undefined,
+      chatChallengeExpiresAt: undefined,
+      updatedAt: Date.now(),
+    };
+    if (newShared) {
+      await ctx.db.patch(newShared._id, sharedFields);
+    } else {
+      await ctx.db.insert("telegramBots", {
+        botId: newBotId,
+        botToken: config.pendingBotToken,
+        botUsername: config.pendingBotUsername,
+        chatVerified: false,
+        updatedAt: Date.now(),
+      });
+    }
+
+    if (oldBotId && oldBotId !== newBotId) {
+      const remainingConfigs = await ctx.db.query("telegramConfig")
+        .withIndex("by_bot_id", (q) => q.eq("botId", oldBotId)).take(2);
+      if (!remainingConfigs.some((record) => record.userId !== userId)) {
+        const oldShared = await ctx.db.query("telegramBots")
+          .withIndex("by_bot_id", (q) => q.eq("botId", oldBotId)).unique();
+        if (oldShared) await ctx.db.delete(oldShared._id);
+      }
+    }
+
+    await ctx.db.patch(config._id, {
+      botId: newBotId,
+      botToken: config.pendingBotToken,
+      botUsername: config.pendingBotUsername,
+      chatId: undefined,
+      chatTitle: undefined,
+      pendingBotId: undefined,
+      pendingBotToken: undefined,
+      pendingBotUsername: undefined,
+      updatedAt: Date.now(),
+    });
+    if (guestVault) {
+      await ctx.db.patch(guestVault._id, {
+        botId: newBotId,
+        botUsername: config.pendingBotUsername,
+        linkCodeHash: undefined,
+        linkCodeExpiresAt: undefined,
+        updatedAt: Date.now(),
+      });
+    }
+    await ctx.db.patch(userId, { resetting: false });
+    return null;
   },
 });
 

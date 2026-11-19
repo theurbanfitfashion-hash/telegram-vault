@@ -54,7 +54,8 @@ test("guest vault link codes are high entropy, hashed, short-lived, and single-u
 test("vault and Telegram actions resolve linked identities to the original vault owner", async () => {
   const vault = await read("../src/convex/vault.ts");
   const telegram = await read("../src/convex/telegram.ts");
-  assert.match(vault, /return link\?\.vaultUserId \?\? authUserId/);
+  assert.match(vault, /const vaultUserId = link\?\.vaultUserId \?\? userId/);
+  assert.match(vault, /return vaultUserId/);
   assert.match(telegram, /internal\.vault\.resolveVaultUserId/);
 });
 
@@ -73,4 +74,37 @@ test("linking refuses to overwrite an account that already owns vault data", asy
   ]) {
     assert.ok(body.includes(marker), `missing destination guard: ${marker}`);
   }
+});
+
+
+test("bot replacement verifies the new token and blocks accidental bot switching", async () => {
+  const telegram = await read("../src/convex/telegram.ts");
+  const connectStart = telegram.indexOf("export const connectBot");
+  const replaceStart = telegram.indexOf("export const replaceBotToken");
+  const pairStart = telegram.indexOf("export const beginChatConnection", replaceStart);
+  assert.notEqual(connectStart, -1);
+  assert.notEqual(replaceStart, -1);
+  assert.notEqual(pairStart, -1);
+  const connect = telegram.slice(connectStart, replaceStart);
+  const replace = telegram.slice(replaceStart, pairStart);
+  assert.match(connect, /currentConfig\.botId !== nextBotId/);
+  assert.match(connect, /use Reset bot token/);
+  assert.match(replace, /getMe/);
+  assert.match(replace, /internal\.vault\.beginBotReset/);
+});
+
+test("bot reset clears bounded batches of app metadata without deleting Telegram media", async () => {
+  const vault = await read("../src/convex/vault.ts");
+  const start = vault.indexOf("export const continueBotReset");
+  const end = vault.indexOf("// ---------------------------------------------------------------------------\n// Reads", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const reset = vault.slice(start, end);
+  assert.match(reset, /\.take\(100\)/);
+  assert.match(reset, /ctx\.db\.delete\(file\._id\)/);
+  assert.match(reset, /ctx\.db\.delete\(folder\._id\)/);
+  assert.match(reset, /ctx\.db\.delete\(token\._id\)/);
+  assert.match(reset, /chatVerified: false/);
+  assert.doesNotMatch(reset, /deleteMessage|purgeMessages/);
+  assert.match(vault, /getBotResetStatus/);
 });

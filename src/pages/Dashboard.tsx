@@ -1,5 +1,14 @@
 import { BrandWordmark } from "@/components/Brand";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Sheet,
@@ -35,7 +44,7 @@ import {
   RefreshCw,
   Upload,
 } from "lucide-react";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 
@@ -56,8 +65,9 @@ export default function Dashboard() {
   const { uploadFile, downloadFile, deleteFile } = useTransfer();
 
   // --- location ----------------------------------------------------------
-  const folders = useQuery(api.vault.listFolders);
-  const storageUsage = useQuery(api.vault.getStorageUsage);
+  const botResetting = useQuery(api.vault.getBotResetStatus);
+  const folders = useQuery(api.vault.listFolders, botResetting === true ? "skip" : {});
+  const storageUsage = useQuery(api.vault.getStorageUsage, botResetting === true ? "skip" : {});
   const foldersReady = folders !== undefined;
   const requestedId = searchParams.get("f");
   const requestedIsValid =
@@ -101,11 +111,17 @@ export default function Dashboard() {
 
   // --- telegram connection ------------------------------------------------
   const telegramStatus = useAction(api.telegram.telegramStatus);
+  const replaceBotToken = useAction(api.telegram.replaceBotToken);
   const [status, setStatus] = useState<TelegramStatus | null>(null);
   const [statusPhase, setStatusPhase] = useState<"loading" | "ready" | "error">(
     "loading",
   );
   const [showConnect, setShowConnect] = useState(false);
+  const [showResetBotDialog, setShowResetBotDialog] = useState(false);
+  const [replacementToken, setReplacementToken] = useState("");
+  const [resetBotBusy, setResetBotBusy] = useState(false);
+  const [resetBotError, setResetBotError] = useState<string | null>(null);
+  const wasResetting = useRef(false);
 
   const refreshStatus = useCallback(async (): Promise<TelegramStatus | null> => {
     try {
@@ -144,6 +160,37 @@ export default function Dashboard() {
       toast.success("Telegram connected");
     }
   }, [refreshStatus]);
+
+  useEffect(() => {
+    if (botResetting === true) {
+      wasResetting.current = true;
+    } else if (botResetting === false && wasResetting.current) {
+      wasResetting.current = false;
+      void refreshStatus().then((next) => {
+        if (next?.hasToken && !next.chatConnected) setShowConnect(true);
+      });
+      toast.success("Fresh vault ready. Pair your new bot's Telegram chat.");
+    }
+  }, [botResetting, refreshStatus]);
+
+  async function handleReplaceBotToken(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (resetBotBusy || !replacementToken.trim()) return;
+    setResetBotBusy(true);
+    setResetBotError(null);
+    try {
+      await replaceBotToken({ botToken: replacementToken.trim() });
+      setReplacementToken("");
+      setShowResetBotDialog(false);
+      toast("Bot reset started", {
+        description: "Your app records are being cleared in the background. Telegram messages are not deleted.",
+      });
+    } catch (error) {
+      setResetBotError(errorMessage(error));
+    } finally {
+      setResetBotBusy(false);
+    }
+  }
 
   // --- vault operations ---------------------------------------------------
   const createFolder = useMutation(api.vault.createFolder);
@@ -286,6 +333,20 @@ export default function Dashboard() {
   };
 
   // --- states before the vault ------------------------------------------
+  if (botResetting === true) {
+    return (
+      <main className="flex min-h-screen items-center justify-center px-6">
+        <div className="max-w-sm rounded-2xl border border-border/70 bg-card p-7 text-center shadow-card">
+          <Loader2 className="mx-auto size-7 animate-spin text-[var(--brand)]" />
+          <p className="mt-4 text-base font-medium">Preparing your fresh vault</p>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Clearing old app records safely. Your files in Telegram are not being deleted. Keep this page open; you can connect the new bot as soon as this finishes.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   if (statusPhase === "loading" || status === null) return <VaultLoading />;
 
   if (statusPhase === "error") {
@@ -341,6 +402,10 @@ export default function Dashboard() {
       onMove={(folder) => setDialog({ kind: "moveFolder", folder })}
       onDelete={(folder) => setDialog({ kind: "deleteFolder", folder })}
       onChangeBot={() => setShowConnect(true)}
+      onResetBot={() => {
+        setResetBotError(null);
+        setShowResetBotDialog(true);
+      }}
       onSignOut={handleSignOut}
     />
   );
@@ -673,6 +738,60 @@ export default function Dashboard() {
         onClose={() => setViewerFileId(null)}
         onDownload={handleDownload}
       />
+
+      <Dialog
+        open={showResetBotDialog}
+        onOpenChange={(open) => {
+          if (!resetBotBusy) setShowResetBotDialog(open);
+          if (!open) {
+            setReplacementToken("");
+            setResetBotError(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reset bot token and start fresh?</DialogTitle>
+            <DialogDescription>
+              This clears this vault's file and folder listings, upload/download sessions, and old bot connection. It does not delete Telegram messages or media. The new bot will need secure chat pairing again.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs leading-5 text-foreground">
+            If you are using a shared guest bot-token vault, this reset affects everyone using that same guest vault. Enter a new bot token that is not already connected to another vault.
+          </div>
+          <form onSubmit={handleReplaceBotToken} className="space-y-3">
+            <Input
+              type="password"
+              value={replacementToken}
+              onChange={(event) => setReplacementToken(event.target.value)}
+              placeholder="Paste the new Telegram bot token"
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              maxLength={256}
+              disabled={resetBotBusy}
+              required
+            />
+            {resetBotError ? (
+              <p role="alert" className="text-sm text-destructive">{resetBotError}</p>
+            ) : null}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowResetBotDialog(false)}
+                disabled={resetBotBusy}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" variant="destructive" disabled={resetBotBusy || !replacementToken.trim()}>
+                {resetBotBusy ? <Loader2 className="mr-2 size-4 animate-spin" /> : <RefreshCw className="mr-2 size-4" />}
+                Verify & reset vault
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -694,6 +813,7 @@ function SidebarBody({
   onMove,
   onDelete,
   onChangeBot,
+  onResetBot,
   onSignOut,
 }: {
   tree: ReturnType<typeof buildTree>;
@@ -708,6 +828,7 @@ function SidebarBody({
   onMove: (folder: Doc<"folders">) => void;
   onDelete: (folder: Doc<"folders">) => void;
   onChangeBot: () => void;
+  onResetBot: () => void;
   onSignOut: () => void;
 }) {
   return (
@@ -771,7 +892,15 @@ function SidebarBody({
               className="h-7 px-2 text-xs"
               onClick={onChangeBot}
             >
-              Change bot
+              Reconnect
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs text-destructive"
+              onClick={onResetBot}
+            >
+              Reset bot
             </Button>
             <Button
               variant="ghost"

@@ -91,6 +91,10 @@ const schema = defineSchema(
       botUsername: v.optional(v.string()),
       chatId: v.optional(v.string()),
       chatTitle: v.optional(v.string()),
+      // Pending replacement credentials stay server-side while old metadata is cleared.
+      pendingBotToken: v.optional(v.string()),
+      pendingBotId: v.optional(v.string()),
+      pendingBotUsername: v.optional(v.string()),
       updatedAt: v.number(),
     })
       .index("by_user", ["userId"])
