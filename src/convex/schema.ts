@@ -101,6 +101,8 @@ const schema = defineSchema(
       botUsername: v.string(),
       chatId: v.optional(v.string()),
       chatTitle: v.optional(v.string()),
+      // Only chats paired with a one-time challenge may receive or serve vault files.
+      chatVerified: v.optional(v.boolean()),
       // One-time, short-lived proof that the person connecting controls this Telegram chat.
       chatChallenge: v.optional(v.string()),
       chatChallengeExpiresAt: v.optional(v.number()),
