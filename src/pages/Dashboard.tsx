@@ -29,6 +29,7 @@ import {
   FolderPlus,
   Headphones,
   Loader2,
+  Link2,
   LogOut,
   Menu,
   RefreshCw,
@@ -416,6 +417,10 @@ export default function Dashboard() {
             <Button size="sm" variant="outline" onClick={() => { const player = window.open(`${window.location.origin}/music`, "telegram-vault-music", "popup=yes,width=460,height=820,resizable=yes,scrollbars=yes"); if (!player) navigate("/music"); else player.focus(); }}>
               <Headphones className="mr-2 size-4" />
               <span className="hidden sm:inline">Music</span>
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => navigate("/account")}>
+              <Link2 className="mr-2 size-4" />
+              <span className="hidden sm:inline">Account</span>
             </Button>
             <Button size="sm" onClick={() => fileInputRef.current?.click()}>
               <Upload className="mr-2 size-4" />
