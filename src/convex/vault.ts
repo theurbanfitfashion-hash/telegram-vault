@@ -657,7 +657,7 @@ export const getChunkUploadUrl = mutation({
  */
 export const createChunkTransferToken = mutation({
   args: { fileId: v.id("files"), index: v.number() },
-  returns: v.string(),
+  returns: v.object({ token: v.string(), alreadyUploaded: v.boolean() }),
   handler: async (ctx, { fileId, index }) => {
     const userId = await requireUser(ctx);
     const file = await ctx.db.get(fileId);
@@ -666,20 +666,23 @@ export const createChunkTransferToken = mutation({
     if (!Number.isInteger(index) || index < 0 || index >= file.chunkCount) {
       throw new ConvexError("That part is out of range.");
     }
+    if (file.partMap?.[String(index)]) {
+      return { token: "", alreadyUploaded: true };
+    }
     const now = Date.now();
     const existing = await ctx.db.query("uploadTokens")
       .withIndex("by_file_index", (q) => q.eq("fileId", fileId).eq("index", index))
       .take(5);
     const reusable = existing.find((record) => record.userId === userId && record.expiresAt > now);
-    if (reusable) return reusable.token;
+    if (reusable) return { token: reusable.token, alreadyUploaded: false };
     for (const record of existing) await ctx.db.delete(record._id);
     const bytes = new Uint8Array(24);
     crypto.getRandomValues(bytes);
     const token = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
     await ctx.db.insert("uploadTokens", {
-      token, fileId, userId, index, expiresAt: now + 15 * 60 * 1000,
+      token, fileId, userId, index, expiresAt: now + 60 * 60 * 1000,
     });
-    return token;
+    return { token, alreadyUploaded: false };
   },
 });
 
