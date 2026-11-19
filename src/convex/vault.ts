@@ -923,6 +923,11 @@ export const saveTelegramConfig = internalMutation({
     if (!user) throw new ConvexError("The vault account no longer exists.");
     const existing = await ctx.db.query("telegramConfig")
       .withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    const otherBotConfigs = await ctx.db.query("telegramConfig")
+      .withIndex("by_bot_id", (q) => q.eq("botId", botId)).take(2);
+    if (otherBotConfigs.some((config) => config.userId !== userId)) {
+      throw new ConvexError("This bot is already configured in another account. We won't choose an owner automatically because that could expose or hide existing files.");
+    }
     const guestVault = await ctx.db.query("guestBotVaults")
       .withIndex("by_user", (q) => q.eq("userId", userId)).unique();
     const legacyBotVault = await ctx.db.query("guestBotVaults")
