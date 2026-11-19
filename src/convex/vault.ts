@@ -640,21 +640,52 @@ export const saveTelegramConfig = internalMutation({
   },
 });
 
+export const saveChatChallenge = internalMutation({
+  args: {
+    botId: v.string(),
+    challenge: v.string(),
+    expiresAt: v.number(),
+  },
+  handler: async (ctx, { botId, challenge, expiresAt }) => {
+    const existing = await ctx.db
+      .query("telegramBots")
+      .withIndex("by_bot_id", (q) => q.eq("botId", botId))
+      .unique();
+    if (!existing) throw new Error("Connect the bot before pairing its Telegram chat.");
+    await ctx.db.patch(existing._id, {
+      chatChallenge: challenge,
+      chatChallengeExpiresAt: expiresAt,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 export const saveChat = internalMutation({
   args: {
     botId: v.string(),
     chatId: v.string(),
     chatTitle: v.optional(v.string()),
+    challenge: v.string(),
   },
-  handler: async (ctx, { botId, chatId, chatTitle }) => {
+  handler: async (ctx, { botId, chatId, chatTitle, challenge }) => {
     const existing = await ctx.db
       .query("telegramBots")
       .withIndex("by_bot_id", (q) => q.eq("botId", botId))
       .unique();
     if (!existing) throw new Error("Connect the bot before saving its Telegram chat.");
+    if (
+      !existing.chatChallenge ||
+      existing.chatChallenge !== challenge ||
+      !existing.chatChallengeExpiresAt ||
+      existing.chatChallengeExpiresAt < Date.now()
+    ) {
+      throw new ConvexError("This Telegram pairing link is invalid or expired. Generate a new one.");
+    }
     await ctx.db.patch(existing._id, {
       chatId,
       chatTitle,
+      chatChallenge: undefined,
+      chatChallengeExpiresAt: undefined,
       updatedAt: Date.now(),
     });
   },
