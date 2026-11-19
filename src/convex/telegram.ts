@@ -112,11 +112,11 @@ async function telegram<T>(
 }
 
 async function requireUser(ctx: ActionCtx): Promise<Id<"users">> {
-  const userId = await getAuthUserId(ctx);
-  if (userId === null) {
+  const authUserId = await getAuthUserId(ctx);
+  if (authUserId === null) {
     throw new ConvexError("You need to sign in to do that.");
   }
-  return userId;
+  return await ctx.runQuery(internal.vault.resolveVaultUserId, { userId: authUserId });
 }
 
 function envToken(): string | undefined {
