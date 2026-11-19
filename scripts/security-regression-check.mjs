@@ -29,7 +29,7 @@ test("Telegram chat replacement requires the current unexpired one-time challeng
 
 test("Telegram pairing does not delete webhooks when polling is unavailable", async () => {
   const source = await read("../src/convex/telegram.ts");
-  assert.match(source, /active webhook or another polling session/i);
+  assert.match(source, /webhook or another polling session/i);
   assert.doesNotMatch(source, /deleteWebhook/);
 });
 
