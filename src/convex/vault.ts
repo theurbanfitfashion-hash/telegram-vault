@@ -193,8 +193,27 @@ export const linkGuestVault = mutation({
       .query("telegramConfig")
       .withIndex("by_user", (q) => q.eq("userId", authUserId))
       .unique();
-    if (destinationFiles.length || destinationFolders.length || destinationConfig) {
-      throw new ConvexError("This Google/email account already has its own vault data. It cannot be linked without a separate safe merge.");
+    const destinationGuestVault = await ctx.db
+      .query("guestBotVaults")
+      .withIndex("by_user", (q) => q.eq("userId", authUserId))
+      .unique();
+    const destinationUploadTokens = await ctx.db
+      .query("uploadTokens")
+      .withIndex("by_user_expiry", (q) => q.eq("userId", authUserId))
+      .take(1);
+    const destinationDownloadTokens = await ctx.db
+      .query("downloadTokens")
+      .withIndex("by_user_expiry", (q) => q.eq("userId", authUserId))
+      .take(1);
+    if (
+      destinationFiles.length ||
+      destinationFolders.length ||
+      destinationConfig ||
+      destinationGuestVault ||
+      destinationUploadTokens.length ||
+      destinationDownloadTokens.length
+    ) {
+      throw new ConvexError("This Google/email account already has vault data. It cannot be linked without a separate safe merge.");
     }
     if (!/^[a-f0-9]{64}$/.test(code)) throw new ConvexError("Enter the complete 64-character linking code.");
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code));
@@ -203,7 +222,7 @@ export const linkGuestVault = mutation({
       .query("guestBotVaults")
       .withIndex("by_link_code_hash", (q) => q.eq("linkCodeHash", codeHash))
       .unique();
-    if (!guestVault || !guestVault.linkCodeExpiresAt || guestVault.linkCodeExpiresAt < Date.now()) {
+    if (!guestVault || !guestVault.linkCodeExpiresAt || guestVault.linkCodeExpiresAt <= Date.now()) {
       throw new ConvexError("This linking code is invalid or expired. Generate a new code from your guest login.");
     }
     if (guestVault.userId === authUserId) throw new ConvexError("This account is already the guest vault owner.");
