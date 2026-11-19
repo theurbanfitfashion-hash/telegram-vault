@@ -809,6 +809,7 @@ export const resolveUploadTransfer = internalQuery({
     fileName: v.string(),
     index: v.number(),
     chunkCount: v.number(),
+    expectedBytes: v.number(),
   })),
   handler: async (ctx, { token }) => {
     const capability = await ctx.db.query("uploadTokens")
@@ -829,7 +830,12 @@ export const resolveUploadTransfer = internalQuery({
     if (!botToken || !chatId) return null;
     return {
       botToken, chatId, fileName: file.name,
-      index: capability.index, chunkCount: file.chunkCount,
+      index: capability.index,
+      chunkCount: file.chunkCount,
+      expectedBytes: Math.min(
+        file.chunkBytes ?? CHUNK_BYTES,
+        file.size - capability.index * (file.chunkBytes ?? CHUNK_BYTES),
+      ),
     };
   },
 });
