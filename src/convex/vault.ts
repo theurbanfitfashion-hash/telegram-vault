@@ -26,6 +26,14 @@ async function requireUser(
   if (authUserId === null) {
     throw new ConvexError("You need to sign in to do that.");
   }
+  const authUser = await ctx.db.get(authUserId);
+  if (authUser?.isAnonymous === true) {
+    const linkedGuestVault = await ctx.db.query("guestVaultLinks")
+      .withIndex("by_vault_user", (q) => q.eq("vaultUserId", authUserId)).unique();
+    if (linkedGuestVault) {
+      throw new ConvexError("This guest vault is linked to a Google/email account. Sign in with that account instead.");
+    }
+  }
   const link = await ctx.db
     .query("guestVaultLinks")
     .withIndex("by_auth_user", (q) => q.eq("authUserId", authUserId))
@@ -134,6 +142,14 @@ export const resolveVaultUserId = internalQuery({
   args: { userId: v.id("users") },
   returns: v.id("users"),
   handler: async (ctx, { userId }) => {
+    const authUser = await ctx.db.get(userId);
+    if (authUser?.isAnonymous === true) {
+      const linkedGuestVault = await ctx.db.query("guestVaultLinks")
+        .withIndex("by_vault_user", (q) => q.eq("vaultUserId", userId)).unique();
+      if (linkedGuestVault) {
+        throw new ConvexError("This guest vault is linked to a Google/email account. Sign in with that account instead.");
+      }
+    }
     const link = await ctx.db
       .query("guestVaultLinks")
       .withIndex("by_auth_user", (q) => q.eq("authUserId", userId))
