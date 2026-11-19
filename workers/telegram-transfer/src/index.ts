@@ -64,6 +64,7 @@ interface UploadAuthorization {
   fileName: string;
   index: number;
   chunkCount: number;
+  expectedBytes: number;
 }
 
 interface TelegramMessage {
@@ -82,7 +83,7 @@ function multipartStream(
   chatId: string,
   filename: string,
   boundary: string,
-  maxBytes: number,
+  expectedBytes: number,
 ): ReadableStream<Uint8Array> {
   const prefix = encoder.encode(
     `--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}\r\n` +
@@ -107,12 +108,15 @@ function multipartStream(
           const next = await reader.read();
           if (!next.done) {
             receivedBytes += next.value.byteLength;
-            if (receivedBytes > maxBytes) {
-              await reader.cancel("Upload part exceeds the configured limit.");
-              throw new Error("Each upload part must be 18 MB or smaller.");
+            if (receivedBytes > expectedBytes) {
+              await reader.cancel("Upload part exceeds its expected size.");
+              throw new Error("Upload part is larger than the expected chunk size.");
             }
             controller.enqueue(next.value);
             return;
+          }
+          if (receivedBytes !== expectedBytes) {
+            throw new Error("Upload part is smaller than the expected chunk size.");
           }
           phase = 2;
         }
@@ -155,6 +159,16 @@ async function upload(request: Request, env: Env): Promise<Response> {
   if (!authorization.botToken || !authorization.chatId) {
     return json(409, { error: "Connect and verify your Telegram chat before uploading." });
   }
+  if (
+    !Number.isSafeInteger(authorization.expectedBytes) ||
+    authorization.expectedBytes <= 0 ||
+    authorization.expectedBytes > MAX_CHUNK_BYTES
+  ) {
+    return json(409, { error: "Upload authorization contains an invalid chunk size." });
+  }
+  if (rawLength !== null && Number(rawLength) !== authorization.expectedBytes) {
+    return json(400, { error: "Upload body size does not match the expected chunk size." });
+  }
 
   const boundary = `----TelegramVault${crypto.randomUUID().replace(/-/g, "")}`;
   const body = multipartStream(request.body, authorization.chatId, 
@@ -162,7 +176,7 @@ async function upload(request: Request, env: Env): Promise<Response> {
       ? `${authorization.fileName}.part${String(authorization.index + 1).padStart(4, "0")}`
       : authorization.fileName,
     boundary,
-    MAX_CHUNK_BYTES,
+    authorization.expectedBytes,
   );
   const telegramResponse = await fetch(
     `https://api.telegram.org/bot${authorization.botToken}/sendDocument`,
