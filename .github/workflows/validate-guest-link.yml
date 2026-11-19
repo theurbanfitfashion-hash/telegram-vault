@@ -5,6 +5,7 @@ on:
     branches: [security/google-guest-account-linking]
   workflow_dispatch:
 
+ # This workflow only builds/tests; it never deploys.
 permissions:
   contents: read
 
