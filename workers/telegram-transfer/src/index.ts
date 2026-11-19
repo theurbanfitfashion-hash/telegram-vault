@@ -43,7 +43,7 @@ async function convexPost<T>(env: Env, path: string, body: unknown): Promise<T> 
     const message = result && typeof result === "object" && "error" in result
       ? String(result.error)
       : "Convex transfer authorization failed";
-    throw new Error(message);
+    throw Object.assign(new Error(message), { status: response.status });
   }
   return result as T;
 }
@@ -410,8 +410,10 @@ export default {
       return withCors(new Response("Not found", { status: 404 }), origin, env);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Transfer failed.";
-      console.error(JSON.stringify({ event: "transfer_error", path: url.pathname, message }));
-      return withCors(json(502, { error: message }), origin, env);
+      const status = error && typeof error === "object" && "status" in error &&
+        typeof error.status === "number" ? error.status : 502;
+      console.error(JSON.stringify({ event: "transfer_error", path: url.pathname, message, status }));
+      return withCors(json(status, { error: message }), origin, env);
     }
   },
 };
