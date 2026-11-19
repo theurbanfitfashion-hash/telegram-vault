@@ -326,6 +326,14 @@ function disposition(name: string, attachment: boolean): string {
 
 async function download(request: Request, env: Env, token: string, index?: number): Promise<Response> {
   const file = await resolveDownload(env, token);
+  if (
+    !Number.isSafeInteger(file.size) || file.size < 0 ||
+    !Number.isSafeInteger(file.chunkBytes) || file.chunkBytes <= 0 ||
+    !Array.isArray(file.partIds) ||
+    file.partIds.some((partId) => typeof partId !== "string" || partId.length === 0)
+  ) {
+    throw new Error("Stored file metadata is invalid.");
+  }
   if (index !== undefined) {
     if (!Number.isInteger(index) || index < 0 || index >= file.partIds.length) {
       return new Response("Part not found", { status: 404 });
@@ -414,6 +422,9 @@ export default {
         if (!token || !/^[a-f0-9]{48}$/.test(token)) {
           return withCors(new Response("Invalid download link", { status: 400 }), origin, env);
         }
+        if (rawIndex === "" || url.pathname.split("/").length > 4) {
+          return withCors(new Response("Invalid file route", { status: 400 }), origin, env);
+        }
         const index = rawIndex === undefined ? undefined : Number(rawIndex);
         return withCors(await download(request, env, token, index), origin, env);
       }
@@ -422,7 +433,10 @@ export default {
       const message = error instanceof Error ? error.message : "Transfer failed.";
       const status = error && typeof error === "object" && "status" in error &&
         typeof error.status === "number" ? error.status : 502;
-      console.error(JSON.stringify({ event: "transfer_error", path: url.pathname, message, status }));
+      const route = url.pathname.startsWith("/file/")
+        ? (url.pathname.split("/").length > 3 ? "/file/:token/:index" : "/file/:token")
+        : url.pathname;
+      console.error(JSON.stringify({ event: "transfer_error", route, message, status }));
       return withCors(json(status, { error: message }), origin, env);
     }
   },
