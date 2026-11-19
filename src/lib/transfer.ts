@@ -203,12 +203,14 @@ export function useTransfer() {
         for (let attempt = 0; attempt < 4; attempt++) {
           try {
             if (transferWorkerUrl) {
-              const token = await createChunkTransferToken({ fileId, index });
-              await postSliceToWorker(`${transferWorkerUrl}/upload`, slice, token, (loaded) => {
-                onPatch({ phase: "uploading", chunkIndex: index }, workerIndex);
-                inFlightProgress.set(workerIndex, Math.min(loaded, slice.size));
-                reportProgress(workerIndex);
-              });
+              const capability = await createChunkTransferToken({ fileId, index });
+              if (!capability.alreadyUploaded) {
+                await postSliceToWorker(`${transferWorkerUrl}/upload`, slice, capability.token, (loaded) => {
+                  onPatch({ phase: "uploading", chunkIndex: index }, workerIndex);
+                  inFlightProgress.set(workerIndex, Math.min(loaded, slice.size));
+                  reportProgress(workerIndex);
+                });
+              }
             } else {
               // Backward-compatible fallback until Cloudflare is configured.
               const uploadUrl = await getChunkUploadUrl({ fileId, index });
