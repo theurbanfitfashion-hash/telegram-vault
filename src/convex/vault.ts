@@ -804,10 +804,10 @@ export const saveChatChallenge = internalMutation({
       .withIndex("by_bot_id", (q) => q.eq("botId", botId))
       .unique();
     if (!existing) throw new Error("Connect the bot before pairing its Telegram chat.");
+    // Keep the last verified destination live until a replacement challenge
+    // is successfully redeemed. A failed or abandoned pairing must not
+    // interrupt existing uploads and downloads.
     await ctx.db.patch(existing._id, {
-      chatId: undefined,
-      chatTitle: undefined,
-      chatVerified: false,
       chatChallenge: challenge,
       chatChallengeExpiresAt: expiresAt,
       updatedAt: Date.now(),
