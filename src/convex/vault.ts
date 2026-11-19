@@ -270,8 +270,13 @@ export const linkGuestVault = mutation({
       throw new ConvexError("The guest vault's saved bot does not match its registered bot identity.");
     }
 
+    await ctx.db.patch(guestConfig._id, {
+      botId: guestVault.botId,
+      botToken: destinationConfig?.botToken ?? guestConfig.botToken,
+      botUsername: destinationConfig?.botUsername ?? guestConfig.botUsername,
+      updatedAt: Date.now(),
+    });
     if (destinationConfig) await ctx.db.delete(destinationConfig._id);
-    await ctx.db.patch(guestConfig._id, { botId: guestVault.botId, updatedAt: Date.now() });
     if (botOwner) {
       await ctx.db.patch(botOwner._id, {
         ownerUserId: authUserId,
