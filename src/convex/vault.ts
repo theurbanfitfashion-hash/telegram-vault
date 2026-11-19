@@ -651,6 +651,38 @@ export const getChunkUploadUrl = mutation({
   },
 });
 
+/**
+ * Issues a short-lived, per-part capability for the Cloudflare transfer Worker.
+ * The capability is scoped to one file, one part, and the authenticated vault owner.
+ */
+export const createChunkTransferToken = mutation({
+  args: { fileId: v.id("files"), index: v.number() },
+  returns: v.string(),
+  handler: async (ctx, { fileId, index }) => {
+    const userId = await requireUser(ctx);
+    const file = await ctx.db.get(fileId);
+    if (!file || file.userId !== userId) throw new ConvexError("Upload not found.");
+    if (file.status !== "uploading") throw new ConvexError("Upload already finished.");
+    if (!Number.isInteger(index) || index < 0 || index >= file.chunkCount) {
+      throw new ConvexError("That part is out of range.");
+    }
+    const now = Date.now();
+    const existing = await ctx.db.query("uploadTokens")
+      .withIndex("by_file_index", (q) => q.eq("fileId", fileId).eq("index", index))
+      .take(5);
+    const reusable = existing.find((record) => record.userId === userId && record.expiresAt > now);
+    if (reusable) return reusable.token;
+    for (const record of existing) await ctx.db.delete(record._id);
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    const token = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    await ctx.db.insert("uploadTokens", {
+      token, fileId, userId, index, expiresAt: now + 15 * 60 * 1000,
+    });
+    return token;
+  },
+});
+
 export const finishUpload = mutation({
   args: { fileId: v.id("files") },
   handler: async (ctx, { fileId }) => {
@@ -755,6 +787,69 @@ export const getTelegramBotDoc = internalQuery({
       .query("telegramBots")
       .withIndex("by_bot_id", (q) => q.eq("botId", botId))
       .unique();
+  },
+});
+
+/** Resolve a one-part upload capability for the trusted Cloudflare Worker. */
+export const resolveUploadTransfer = internalQuery({
+  args: { token: v.string() },
+  returns: v.union(v.null(), v.object({
+    botToken: v.string(),
+    chatId: v.string(),
+    fileName: v.string(),
+    index: v.number(),
+    chunkCount: v.number(),
+  })),
+  handler: async (ctx, { token }) => {
+    const capability = await ctx.db.query("uploadTokens")
+      .withIndex("by_token", (q) => q.eq("token", token)).unique();
+    if (!capability || capability.expiresAt <= Date.now() || capability.index === undefined) return null;
+    const file = await ctx.db.get(capability.fileId);
+    if (!file || file.userId !== capability.userId || file.status !== "uploading") return null;
+    if (capability.index < 0 || capability.index >= file.chunkCount) return null;
+    const config = await ctx.db.query("telegramConfig")
+      .withIndex("by_user", (q) => q.eq("userId", capability.userId)).unique();
+    if (!config?.botToken) return null;
+    const bot = config.botId
+      ? await ctx.db.query("telegramBots")
+          .withIndex("by_bot_id", (q) => q.eq("botId", config.botId!)).unique()
+      : null;
+    const botToken = bot?.botToken ?? config.botToken;
+    const chatId = bot?.chatVerified === true ? bot.chatId : undefined;
+    if (!botToken || !chatId) return null;
+    return {
+      botToken, chatId, fileName: file.name,
+      index: capability.index, chunkCount: file.chunkCount,
+    };
+  },
+});
+
+/** Atomically stores a Telegram part reference and consumes its upload capability. */
+export const recordTransferredPart = internalMutation({
+  args: {
+    token: v.string(),
+    telegramFileId: v.string(),
+    messageId: v.number(),
+  },
+  returns: v.null(),
+  handler: async (ctx, { token, telegramFileId, messageId }) => {
+    const capability = await ctx.db.query("uploadTokens")
+      .withIndex("by_token", (q) => q.eq("token", token)).unique();
+    if (!capability || capability.expiresAt <= Date.now() || capability.index === undefined) {
+      throw new ConvexError("This upload authorization expired. Please retry the part.");
+    }
+    const file = await ctx.db.get(capability.fileId);
+    if (!file || file.userId !== capability.userId || file.status !== "uploading") {
+      throw new ConvexError("This upload is no longer active.");
+    }
+    if (capability.index < 0 || capability.index >= file.chunkCount) {
+      throw new ConvexError("That part is out of range.");
+    }
+    const partMap = { ...(file.partMap ?? {}) };
+    partMap[String(capability.index)] = { fileId: telegramFileId, messageId };
+    await ctx.db.patch(file._id, { partMap });
+    await ctx.db.delete(capability._id);
+    return null;
   },
 });
 
