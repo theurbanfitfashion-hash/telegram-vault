@@ -325,9 +325,20 @@ export const detectChat = action({
     // Do not delete a webhook or accept arbitrary private messages. Only the
     // exact one-time /start challenge generated for this signed-in session
     // proves control of the intended Telegram chat.
-    const updates = await telegram<TelegramUpdate[]>("getUpdates", bot.token, {
-      json: { timeout: 0, allowed_updates: ["message"] },
-    });
+    let updates: TelegramUpdate[];
+    try {
+      updates = await telegram<TelegramUpdate[]>("getUpdates", bot.token, {
+        json: { timeout: 0, allowed_updates: ["message"] },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (/webhook|conflict.*getupdates|terminated by other getupdates/i.test(message)) {
+        throw new ConvexError(
+          "Telegram is currently using a webhook or another polling session, so secure pairing cannot read the Start confirmation. We will not remove your webhook or disconnect your existing verified chat. Disable the competing poller or configure the bot for polling, then generate a fresh pairing link.",
+        );
+      }
+      throw error;
+    }
     const matched = updates.find(
       (update) =>
         update.message?.chat?.type === "private" &&
