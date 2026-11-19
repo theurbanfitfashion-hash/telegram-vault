@@ -400,8 +400,17 @@ export const continueBotReset = internalMutation({
       chatChallengeExpiresAt: undefined,
       updatedAt: Date.now(),
     };
-    if (newShared) await ctx.db.patch(newShared._id, sharedFields);
-    else await ctx.db.insert("telegramBots", { botId: newBotId, ...sharedFields });
+    if (newShared) {
+      await ctx.db.patch(newShared._id, sharedFields);
+    } else {
+      await ctx.db.insert("telegramBots", {
+        botId: newBotId,
+        botToken: config.pendingBotToken,
+        botUsername: config.pendingBotUsername,
+        chatVerified: false,
+        updatedAt: Date.now(),
+      });
+    }
 
     if (oldBotId && oldBotId !== newBotId) {
       const remainingConfigs = await ctx.db.query("telegramConfig")
