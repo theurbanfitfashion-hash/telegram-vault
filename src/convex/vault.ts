@@ -407,6 +407,11 @@ export const continueAccountReset = internalMutation({
     const existingOwner = await ctx.db.query("telegramBotOwners")
       .withIndex("by_owner_user", (q) => q.eq("ownerUserId", authUserId)).take(1);
     const botId = config?.botId ?? guestVault?.botId ?? existingOwner[0]?.botId;
+    const remainingBotConfigs = botId
+      ? await ctx.db.query("telegramConfig")
+          .withIndex("by_bot_id", (q) => q.eq("botId", botId)).take(3)
+      : [];
+    const hasOtherBotConfig = remainingBotConfigs.some((record) => record.userId !== vaultUserId);
 
     if (botId) {
       const owner = await ctx.db.query("telegramBotOwners")
@@ -417,9 +422,11 @@ export const continueAccountReset = internalMutation({
           releasedAt: Date.now(),
           updatedAt: Date.now(),
         });
-        const shared = await ctx.db.query("telegramBots")
-          .withIndex("by_bot_id", (q) => q.eq("botId", botId)).unique();
-        if (shared) await ctx.db.delete(shared._id);
+        if (!hasOtherBotConfig) {
+          const shared = await ctx.db.query("telegramBots")
+            .withIndex("by_bot_id", (q) => q.eq("botId", botId)).unique();
+          if (shared) await ctx.db.delete(shared._id);
+        }
       } else if (!owner) {
         const guestOwner = await ctx.db.query("guestBotVaults")
           .withIndex("by_bot_id", (q) => q.eq("botId", botId)).unique();
@@ -430,9 +437,11 @@ export const continueAccountReset = internalMutation({
             createdAt: Date.now(),
             updatedAt: Date.now(),
           });
-          const shared = await ctx.db.query("telegramBots")
-            .withIndex("by_bot_id", (q) => q.eq("botId", botId)).unique();
-          if (shared) await ctx.db.delete(shared._id);
+          if (!hasOtherBotConfig) {
+            const shared = await ctx.db.query("telegramBots")
+              .withIndex("by_bot_id", (q) => q.eq("botId", botId)).unique();
+            if (shared) await ctx.db.delete(shared._id);
+          }
         }
       }
     }
