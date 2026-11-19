@@ -360,6 +360,16 @@ async function download(request: Request, env: Env, token: string, index?: numbe
   }
   const start = range?.start ?? 0;
   const end = range?.end ?? file.size - 1;
+  const firstPart = Math.floor(start / file.chunkBytes);
+  const lastPart = Math.floor(end / file.chunkBytes);
+  // Free Workers allow 50 external subrequests per invocation. Each Telegram
+  // part needs getFile + file download, plus one Convex authorization request.
+  if (lastPart - firstPart + 1 > 24) {
+    return new Response(
+      "This full-file request spans too many Telegram parts for one Cloudflare Free request. Use a browser with the Save File picker to stream the parts individually.",
+      { status: 501, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   const attachment = new URL(request.url).searchParams.get("download") === "1";
   const contentType = file.mimeType || "application/octet-stream";
   const headers = new Headers({
