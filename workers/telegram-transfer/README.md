@@ -11,6 +11,8 @@ This Worker moves Telegram file bytes without routing them through Convex. Conve
 
 The Worker does not store files, bot tokens, or account data. It does not buffer whole upload/download bodies in memory.
 
+Cloudflare Workers Free allows 50 external subrequests per invocation. The whole-file route therefore accepts a maximum of 24 Telegram parts in one request (about 432 MB with the current 18 MB chunk size). Larger files still work through the app's part-by-part Save File picker flow, because each part is downloaded in a separate Worker request. Chrome 132+ on Android supports the File System Access save picker; desktop Chromium browsers support it as well. Browsers without that API cannot use the Free-plan whole-file fallback for files larger than 24 parts.
+
 ## Required configuration
 
 Set these Worker variables for the production deployment:
