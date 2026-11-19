@@ -82,6 +82,7 @@ function multipartStream(
   chatId: string,
   filename: string,
   boundary: string,
+  maxBytes: number,
 ): ReadableStream<Uint8Array> {
   const prefix = encoder.encode(
     `--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}\r\n` +
@@ -92,6 +93,7 @@ function multipartStream(
   const suffix = encoder.encode(`\r\n--${boundary}--\r\n`);
   const reader = body.getReader();
   let phase: 0 | 1 | 2 | 3 = 0;
+  let receivedBytes = 0;
 
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
@@ -104,6 +106,11 @@ function multipartStream(
         if (phase === 1) {
           const next = await reader.read();
           if (!next.done) {
+            receivedBytes += next.value.byteLength;
+            if (receivedBytes > maxBytes) {
+              await reader.cancel("Upload part exceeds the configured limit.");
+              throw new Error("Each upload part must be 18 MB or smaller.");
+            }
             controller.enqueue(next.value);
             return;
           }
@@ -132,9 +139,12 @@ async function upload(request: Request, env: Env): Promise<Response> {
   if (!token) return json(401, { error: "Upload authorization is missing." });
   if (!request.body) return json(400, { error: "Upload body is missing." });
 
-  const length = Number(request.headers.get("Content-Length"));
-  if (!Number.isSafeInteger(length) || length <= 0 || length > MAX_CHUNK_BYTES) {
-    return json(413, { error: "Each upload part must be between 1 byte and 18 MB." });
+  const rawLength = request.headers.get("Content-Length");
+  if (rawLength !== null) {
+    const length = Number(rawLength);
+    if (!Number.isSafeInteger(length) || length <= 0 || length > MAX_CHUNK_BYTES) {
+      return json(413, { error: "Each upload part must be between 1 byte and 18 MB." });
+    }
   }
 
   const authorization = await convexPost<UploadAuthorization>(
@@ -152,6 +162,7 @@ async function upload(request: Request, env: Env): Promise<Response> {
       ? `${authorization.fileName}.part${String(authorization.index + 1).padStart(4, "0")}`
       : authorization.fileName,
     boundary,
+    MAX_CHUNK_BYTES,
   );
   const telegramResponse = await fetch(
     `https://api.telegram.org/bot${authorization.botToken}/sendDocument`,
@@ -350,8 +361,9 @@ async function download(request: Request, env: Env, token: string, index?: numbe
   const start = range?.start ?? 0;
   const end = range?.end ?? file.size - 1;
   const attachment = new URL(request.url).searchParams.get("download") === "1";
+  const contentType = file.mimeType || "application/octet-stream";
   const headers = new Headers({
-    "Content-Type": file.mimeType || "application/octet-stream",
+    "Content-Type": contentType,
     "Content-Disposition": disposition(file.fileName, attachment),
     "Accept-Ranges": "bytes",
     "Content-Length": String(end - start + 1),
@@ -359,6 +371,10 @@ async function download(request: Request, env: Env, token: string, index?: numbe
     "X-Content-Type-Options": "nosniff",
   });
   if (range) headers.set("Content-Range", `bytes ${start}-${end}/${file.size}`);
+  if (new Set([
+    "text/html", "application/xhtml+xml", "image/svg+xml", "application/xml",
+    "text/xml", "application/javascript", "text/javascript",
+  ]).has(contentType)) headers.set("Content-Security-Policy", "sandbox");
   return new Response(fileStream(file, start, end), {
     status: range ? 206 : 200,
     headers,
