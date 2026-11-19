@@ -28,6 +28,7 @@ const schema = defineSchema(
       email: v.optional(v.string()), // email of the user. do not remove
       emailVerificationTime: v.optional(v.number()), // email verification time. do not remove
       isAnonymous: v.optional(v.boolean()), // is the user anonymous. do not remove
+      resetting: v.optional(v.boolean()), // blocks vault access while an account reset is being processed
 
       role: v.optional(roleValidator), // role of the user. do not remove
     }).index("email", ["email"]), // index for the email. do not remove or modify
@@ -91,7 +92,9 @@ const schema = defineSchema(
       chatId: v.optional(v.string()),
       chatTitle: v.optional(v.string()),
       updatedAt: v.number(),
-    }).index("by_user", ["userId"]),
+    })
+      .index("by_user", ["userId"])
+      .index("by_bot_id", ["botId"]),
 
     // One canonical Telegram storage destination per bot, shared by all app accounts.
     // The bot token is a secret and is never used as a database key.
@@ -108,6 +111,18 @@ const schema = defineSchema(
       chatChallengeExpiresAt: v.optional(v.number()),
       updatedAt: v.number(),
     }).index("by_bot_id", ["botId"]),
+
+    // One Google/email account owns a bot at a time. Released rows remain as
+    // tombstones so legacy guest-token login cannot reclaim an account-owned bot.
+    telegramBotOwners: defineTable({
+      botId: v.string(),
+      ownerUserId: v.optional(v.id("users")),
+      releasedAt: v.optional(v.number()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index("by_bot_id", ["botId"])
+      .index("by_owner_user", ["ownerUserId"]),
 
     // One shared guest vault per Telegram bot. The bot token is never used as a database key.
     guestBotVaults: defineTable({

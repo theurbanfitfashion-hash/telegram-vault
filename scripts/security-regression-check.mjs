@@ -54,7 +54,8 @@ test("guest vault link codes are high entropy, hashed, short-lived, and single-u
 test("vault and Telegram actions resolve linked identities to the original vault owner", async () => {
   const vault = await read("../src/convex/vault.ts");
   const telegram = await read("../src/convex/telegram.ts");
-  assert.match(vault, /return link\?\.vaultUserId \?\? authUserId/);
+  assert.match(vault, /const vaultUserId = link\?\.vaultUserId \?\? authUserId/);
+  assert.match(vault, /return vaultUserId/);
   assert.match(telegram, /internal\.vault\.resolveVaultUserId/);
 });
 
@@ -73,4 +74,61 @@ test("linking refuses to overwrite an account that already owns vault data", asy
   ]) {
     assert.ok(body.includes(marker), `missing destination guard: ${marker}`);
   }
+});
+
+test("guest login is hidden from the public auth screen but legacy recovery stays in the backend", async () => {
+  const authPage = await read("../src/pages/Auth.tsx");
+  const authBackend = await read("../src/convex/auth.ts");
+  assert.doesNotMatch(authPage, /bot-token-guest|Shared guest vault|Open shared guest vault/);
+  assert.match(authBackend, /id: "bot-token-guest"/);
+});
+
+test("one Telegram bot can be owned by only one verified account", async () => {
+  const schema = await read("../src/convex/schema.ts");
+  const vault = await read("../src/convex/vault.ts");
+  assert.match(schema, /telegramBotOwners: defineTable/);
+  assert.match(schema, /index\("by_bot_id", \["botId"\]\)/);
+  assert.match(schema, /index\("by_owner_user", \["ownerUserId"\]\)/);
+  assert.match(vault, /This Telegram bot is already connected to another Google\/email account/);
+  assert.match(vault, /This account already has a different Telegram bot/);
+  assert.match(vault, /const claimedBot = await ctx\.db\.query\("telegramBotOwners"\)/);
+});
+
+test("account reset clears app metadata in bounded batches without deleting Telegram messages", async () => {
+  const vault = await read("../src/convex/vault.ts");
+  const resetStart = vault.indexOf("export const beginAccountReset");
+  const resetEnd = vault.indexOf("// ---------------------------------------------------------------------------\n// Reads", resetStart);
+  assert.notEqual(resetStart, -1);
+  assert.notEqual(resetEnd, -1);
+  const reset = vault.slice(resetStart, resetEnd);
+  assert.match(reset, /resetting: true/);
+  assert.match(reset, /\.take\(100\)/);
+  assert.match(reset, /ctx\.db\.delete\(file\._id\)/);
+  assert.match(reset, /ctx\.db\.delete\(folder\._id\)/);
+  assert.match(reset, /ctx\.db\.delete\(config\._id\)/);
+  assert.match(reset, /releasedAt: Date\.now\(\)/);
+  assert.doesNotMatch(reset, /deleteMessage|purgeMessages/);
+});
+
+test("Telegram connections no longer fall back to a shared deployment bot token", async () => {
+  const source = await read("../src/convex/telegram.ts");
+  assert.doesNotMatch(source, /envToken\(\)|TELEGRAM_BOT_TOKEN/);
+});
+
+test("linked guest sessions cannot keep accessing the vault after linking", async () => {
+  const vault = await read("../src/convex/vault.ts");
+  assert.match(vault, /This guest vault is linked to a Google\/email account/);
+  assert.match(vault, /withIndex\("by_vault_user"/);
+});
+
+test("dashboard surfaces bot ownership conflicts and provides a path to account reset", async () => {
+  const dashboard = await read("../src/pages/Dashboard.tsx");
+  assert.match(dashboard, /setStatusError\(errorMessage\(error\)\)/);
+  assert.match(dashboard, /navigate\("\/account"\)/);
+});
+
+test("legacy duplicate bot configurations are not auto-assigned to the first account that logs in", async () => {
+  const vault = await read("../src/convex/vault.ts");
+  assert.match(vault, /otherBotConfigs/);
+  assert.match(vault, /We won't choose an owner automatically/);
 });

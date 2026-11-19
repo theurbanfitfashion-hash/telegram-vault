@@ -16,7 +16,8 @@ import {
 import { useAuth } from "@/hooks/use-auth";
 import logo from "@/assets/logo.svg";
 import { GuestVaultLink } from "@/components/GuestVaultLink";
-import { ArrowRight, Loader2, LogOut, Mail, Bot } from "lucide-react";
+import { ResetAccount } from "@/components/ResetAccount";
+import { ArrowRight, Loader2, LogOut, Mail } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
@@ -36,7 +37,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const redirect = resolveRedirectAfterAuth(searchParams.get("returnTo"), redirectAfterAuth);
   const [step, setStep] = useState<"signIn" | { email: string }>("signIn");
   const [otp, setOtp] = useState("");
-  const [botToken, setBotToken] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
@@ -83,21 +83,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       setError(caught instanceof Error ? caught.message : "The verification code is incorrect.");
       setOtp("");
     } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleGuestLogin = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setIsLoading(true);
-    setError(null);
-    try {
-      await signIn("bot-token-guest", { botToken: botToken.trim() });
-      setBotToken("");
-      navigate(redirect, { replace: true });
-    } catch (caught) {
-      // Never log credentials: the token grants access to the shared vault.
-      setError(caught instanceof Error ? caught.message : "Could not verify this Telegram bot token.");
       setIsLoading(false);
     }
   };
@@ -149,6 +134,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               </CardHeader>
               <CardContent className="flex flex-col gap-3 pb-6">
                 {user && <GuestVaultLink />}
+                {user?.isAnonymous !== true && <ResetAccount />}
                 <Button className="w-full" onClick={() => navigate(redirect, { replace: true })}>
                   Continue to the vault <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
@@ -185,30 +171,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 <Button type="button" variant="outline" className="w-full" onClick={handleGoogleLogin} disabled={isLoading}>
                   <GoogleIcon className="mr-2 h-4 w-4" /> Continue with Google
                 </Button>
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
-                  <div className="relative flex justify-center text-xs uppercase"><span className="bg-background px-2 text-muted-foreground">Shared guest vault</span></div>
-                </div>
-                <form onSubmit={handleGuestLogin} className="space-y-2">
-                  <Input
-                    type="password"
-                    name="botToken"
-                    autoComplete="off"
-                    autoCapitalize="none"
-                    spellCheck={false}
-                    maxLength={256}
-                    placeholder="Telegram bot token"
-                    aria-label="Telegram bot token"
-                    value={botToken}
-                    onChange={(event) => setBotToken(event.target.value)}
-                    disabled={isLoading}
-                    required
-                  />
-                  <Button type="submit" variant="secondary" className="w-full" disabled={isLoading || !botToken.trim()}>
-                    {isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Verifying bot...</> : <><Bot className="mr-2 h-4 w-4" /> Open shared guest vault</>}
-                  </Button>
-                  <p className="text-xs text-muted-foreground">Anyone with this bot token can access the same shared vault. Keep it private.</p>
-                </form>
+
                 {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
               </CardContent>
             </>
@@ -243,7 +206,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             </>
           )}
           <div className="rounded-b-lg border-t bg-muted px-6 py-4 text-center text-xs text-muted-foreground">
-            Guest vaults are shared by Telegram bot identity. Google and email vaults remain private.
+            Your vault is connected to your personal Telegram bot. Keep your bot token private.
           </div>
         </Card>
       </div>

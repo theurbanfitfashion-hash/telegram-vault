@@ -105,6 +105,7 @@ export default function Dashboard() {
   const [statusPhase, setStatusPhase] = useState<"loading" | "ready" | "error">(
     "loading",
   );
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [showConnect, setShowConnect] = useState(false);
 
   const refreshStatus = useCallback(async (): Promise<TelegramStatus | null> => {
@@ -115,6 +116,7 @@ export default function Dashboard() {
       return next;
     } catch (error) {
       console.error(error);
+      setStatusError(errorMessage(error));
       setStatusPhase("error");
       return null;
     }
@@ -130,7 +132,10 @@ export default function Dashboard() {
       })
       .catch((error: unknown) => {
         console.error(error);
-        if (!cancelled) setStatusPhase("error");
+        if (!cancelled) {
+          setStatusError(errorMessage(error));
+          setStatusPhase("error");
+        }
       });
     return () => {
       cancelled = true;
@@ -296,17 +301,17 @@ export default function Dashboard() {
             Couldn't reach your vault
           </p>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            The connection to the backend dropped. It usually comes back on its
-            own.
+            {statusError ?? "The connection to the backend dropped. It usually comes back on its own."}
           </p>
-          <Button
-            className="mt-5"
-            onClick={() => void refreshStatus()}
-            size="sm"
-          >
-            <RefreshCw className="mr-2 size-4" />
-            Try again
-          </Button>
+          <div className="mt-5 flex flex-wrap justify-center gap-2">
+            <Button onClick={() => navigate("/account")} size="sm" variant="outline">
+              Account settings
+            </Button>
+            <Button onClick={() => void refreshStatus()} size="sm">
+              <RefreshCw className="mr-2 size-4" />
+              Try again
+            </Button>
+          </div>
         </div>
       </main>
     );

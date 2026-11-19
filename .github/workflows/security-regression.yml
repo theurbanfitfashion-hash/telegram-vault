@@ -1,0 +1,36 @@
+name: Security regression tests
+
+on:
+  pull_request:
+    paths:
+      - "src/convex/**"
+      - "src/pages/Auth.tsx"
+      - "src/pages/Dashboard.tsx"
+      - "src/components/ResetAccount.tsx"
+      - "scripts/security-regression-check.mjs"
+      - ".github/workflows/security-regression.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/convex/**"
+      - "src/pages/Auth.tsx"
+      - "src/pages/Dashboard.tsx"
+      - "src/components/ResetAccount.tsx"
+      - "scripts/security-regression-check.mjs"
+      - ".github/workflows/security-regression.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  security-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run security regression tests
+        run: npm run test:security
