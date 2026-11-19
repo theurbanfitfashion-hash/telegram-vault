@@ -19,13 +19,17 @@ import {
 async function requireUser(
   ctx: QueryCtx | MutationCtx,
 ): Promise<Id<"users">> {
-  const userId = await getAuthUserId(ctx);
+  const authUserId = await getAuthUserId(ctx);
   // ConvexError, not Error: production deployments redact plain error
   // messages to "Server Error"; this one is meant for the person clicking.
-  if (userId === null) {
+  if (authUserId === null) {
     throw new ConvexError("You need to sign in to do that.");
   }
-  return userId;
+  const link = await ctx.db
+    .query("guestVaultLinks")
+    .withIndex("by_auth_user", (q) => q.eq("authUserId", authUserId))
+    .unique();
+  return link?.vaultUserId ?? authUserId;
 }
 
 /** Normalises user-supplied names: trimmed, flat, bounded. */
@@ -107,6 +111,158 @@ export const resolveGuestBotVault = internalMutation({
       });
     }
     return userId;
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Guest vault account linking
+// ---------------------------------------------------------------------------
+
+/** Resolve an authenticated identity to the canonical owner of its vault. */
+export const resolveVaultUserId = internalQuery({
+  args: { userId: v.id("users") },
+  returns: v.id("users"),
+  handler: async (ctx, { userId }) => {
+    const link = await ctx.db
+      .query("guestVaultLinks")
+      .withIndex("by_auth_user", (q) => q.eq("authUserId", userId))
+      .unique();
+    return link?.vaultUserId ?? userId;
+  },
+});
+
+/** Create a one-time code while signed in to the original bot-token guest vault. */
+export const createGuestVaultLinkCode = mutation({
+  args: {},
+  returns: v.object({ code: v.string(), expiresAt: v.number() }),
+  handler: async (ctx) => {
+    const authUserId = await getAuthUserId(ctx);
+    if (authUserId === null) throw new ConvexError("Sign in with your existing bot-token guest login first.");
+    const user = await ctx.db.get(authUserId);
+    if (!user || user.isAnonymous !== true) {
+      throw new ConvexError("This step must be started from your original guest vault login.");
+    }
+    const guestVault = await ctx.db
+      .query("guestBotVaults")
+      .withIndex("by_user", (q) => q.eq("userId", authUserId))
+      .unique();
+    if (!guestVault) throw new ConvexError("No bot-token guest vault is connected to this session.");
+    const existingLink = await ctx.db
+      .query("guestVaultLinks")
+      .withIndex("by_vault_user", (q) => q.eq("vaultUserId", authUserId))
+      .unique();
+    if (existingLink) throw new ConvexError("This guest vault is already linked to a sign-in account.");
+
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    const code = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code));
+    const codeHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    const expiresAt = Date.now() + 10 * 60 * 1000;
+    await ctx.db.patch(guestVault._id, {
+      linkCodeHash: codeHash,
+      linkCodeExpiresAt: expiresAt,
+      updatedAt: Date.now(),
+    });
+    return { code, expiresAt };
+  },
+});
+
+/** Attach the currently authenticated, verified email identity to a guest vault. */
+export const linkGuestVault = mutation({
+  args: { code: v.string() },
+  returns: v.object({ linked: v.boolean() }),
+  handler: async (ctx, { code }) => {
+    const authUserId = await getAuthUserId(ctx);
+    if (authUserId === null) throw new ConvexError("Sign in with Google or a verified email account first.");
+    const authUser = await ctx.db.get(authUserId);
+    if (!authUser || authUser.isAnonymous === true || !authUser.email || authUser.emailVerificationTime === undefined) {
+      throw new ConvexError("Use a verified Google or email account to link this vault.");
+    }
+    // Never make an existing personal Google/email vault appear to disappear.
+    // Linking is allowed only when the destination identity has no vault data.
+    const destinationFiles = await ctx.db
+      .query("files")
+      .withIndex("by_user", (q) => q.eq("userId", authUserId))
+      .take(1);
+    const destinationFolders = await ctx.db
+      .query("folders")
+      .withIndex("by_user", (q) => q.eq("userId", authUserId))
+      .take(1);
+    const destinationConfig = await ctx.db
+      .query("telegramConfig")
+      .withIndex("by_user", (q) => q.eq("userId", authUserId))
+      .unique();
+    const destinationGuestVault = await ctx.db
+      .query("guestBotVaults")
+      .withIndex("by_user", (q) => q.eq("userId", authUserId))
+      .unique();
+    const destinationUploadTokens = await ctx.db
+      .query("uploadTokens")
+      .withIndex("by_user_expiry", (q) => q.eq("userId", authUserId))
+      .take(1);
+    const destinationDownloadTokens = await ctx.db
+      .query("downloadTokens")
+      .withIndex("by_user_expiry", (q) => q.eq("userId", authUserId))
+      .take(1);
+    if (
+      destinationFiles.length ||
+      destinationFolders.length ||
+      destinationConfig ||
+      destinationGuestVault ||
+      destinationUploadTokens.length ||
+      destinationDownloadTokens.length
+    ) {
+      throw new ConvexError("This Google/email account already has vault data. It cannot be linked without a separate safe merge.");
+    }
+    if (!/^[a-f0-9]{64}$/.test(code)) throw new ConvexError("Enter the complete 64-character linking code.");
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code));
+    const codeHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    const guestVault = await ctx.db
+      .query("guestBotVaults")
+      .withIndex("by_link_code_hash", (q) => q.eq("linkCodeHash", codeHash))
+      .unique();
+    if (!guestVault || !guestVault.linkCodeExpiresAt || guestVault.linkCodeExpiresAt <= Date.now()) {
+      throw new ConvexError("This linking code is invalid or expired. Generate a new code from your guest login.");
+    }
+    if (guestVault.userId === authUserId) throw new ConvexError("This account is already the guest vault owner.");
+    const existingAuthLink = await ctx.db
+      .query("guestVaultLinks")
+      .withIndex("by_auth_user", (q) => q.eq("authUserId", authUserId))
+      .unique();
+    if (existingAuthLink) throw new ConvexError("This Google/email account is already linked to a guest vault.");
+    const existingVaultLink = await ctx.db
+      .query("guestVaultLinks")
+      .withIndex("by_vault_user", (q) => q.eq("vaultUserId", guestVault.userId))
+      .unique();
+    if (existingVaultLink) throw new ConvexError("This guest vault is already linked to another sign-in account.");
+
+    await ctx.db.insert("guestVaultLinks", {
+      authUserId,
+      vaultUserId: guestVault.userId,
+      createdAt: Date.now(),
+    });
+    await ctx.db.patch(guestVault._id, {
+      linkCodeHash: undefined,
+      linkCodeExpiresAt: undefined,
+      updatedAt: Date.now(),
+    });
+    return { linked: true };
+  },
+});
+
+/** Reports whether the signed-in identity is already linked to a guest vault. */
+export const getGuestVaultLinkStatus = query({
+  args: {},
+  returns: v.object({ linked: v.boolean() }),
+  handler: async (ctx) => {
+    const authUserId = await getAuthUserId(ctx);
+    if (authUserId === null) return { linked: false };
+    const link = await ctx.db
+      .query("guestVaultLinks")
+      .withIndex("by_auth_user", (q) => q.eq("authUserId", authUserId))
+      .unique();
+    return { linked: link !== null };
   },
 });
 
@@ -462,7 +618,7 @@ export const resolveWholeFile = internalQuery({
           .unique()
       : null;
     const botToken = bot?.botToken ?? config.botToken;
-    const chatId = bot?.chatId ?? config.chatId;
+    const chatId = bot?.chatVerified === true ? bot.chatId : undefined;
     if (!botToken || !chatId) return null;
 
     return {
@@ -503,7 +659,7 @@ export const resolveDownload = internalQuery({
           .unique()
       : null;
     const botToken = bot?.botToken ?? config.botToken;
-    const chatId = bot?.chatId ?? config.chatId;
+    const chatId = bot?.chatVerified === true ? bot.chatId : undefined;
     if (!botToken || !chatId) return null;
 
     return {
@@ -619,24 +775,43 @@ export const saveTelegramConfig = internalMutation({
       .query("telegramBots")
       .withIndex("by_bot_id", (q) => q.eq("botId", botId))
       .unique();
-    const legacyChatId = !botChanged && !resetChat ? existing?.chatId : undefined;
-    const legacyChatTitle = !botChanged && !resetChat ? existing?.chatTitle : undefined;
     if (shared) {
       await ctx.db.patch(shared._id, {
         botToken,
         botUsername,
         updatedAt: Date.now(),
-        ...(shared.chatId ? {} : legacyChatId ? { chatId: legacyChatId, chatTitle: legacyChatTitle } : {}),
       });
     } else {
       await ctx.db.insert("telegramBots", {
         botId,
         botToken,
         botUsername,
-        ...(legacyChatId ? { chatId: legacyChatId, chatTitle: legacyChatTitle } : {}),
         updatedAt: Date.now(),
       });
     }
+  },
+});
+
+export const saveChatChallenge = internalMutation({
+  args: {
+    botId: v.string(),
+    challenge: v.string(),
+    expiresAt: v.number(),
+  },
+  handler: async (ctx, { botId, challenge, expiresAt }) => {
+    const existing = await ctx.db
+      .query("telegramBots")
+      .withIndex("by_bot_id", (q) => q.eq("botId", botId))
+      .unique();
+    if (!existing) throw new Error("Connect the bot before pairing its Telegram chat.");
+    // Keep the last verified destination live until a replacement challenge
+    // is successfully redeemed. A failed or abandoned pairing must not
+    // interrupt existing uploads and downloads.
+    await ctx.db.patch(existing._id, {
+      chatChallenge: challenge,
+      chatChallengeExpiresAt: expiresAt,
+      updatedAt: Date.now(),
+    });
   },
 });
 
@@ -645,16 +820,28 @@ export const saveChat = internalMutation({
     botId: v.string(),
     chatId: v.string(),
     chatTitle: v.optional(v.string()),
+    challenge: v.string(),
   },
-  handler: async (ctx, { botId, chatId, chatTitle }) => {
+  handler: async (ctx, { botId, chatId, chatTitle, challenge }) => {
     const existing = await ctx.db
       .query("telegramBots")
       .withIndex("by_bot_id", (q) => q.eq("botId", botId))
       .unique();
     if (!existing) throw new Error("Connect the bot before saving its Telegram chat.");
+    if (
+      !existing.chatChallenge ||
+      existing.chatChallenge !== challenge ||
+      !existing.chatChallengeExpiresAt ||
+      existing.chatChallengeExpiresAt <= Date.now()
+    ) {
+      throw new ConvexError("This Telegram pairing link is invalid or expired. Generate a new one.");
+    }
     await ctx.db.patch(existing._id, {
       chatId,
       chatTitle,
+      chatVerified: true,
+      chatChallenge: undefined,
+      chatChallengeExpiresAt: undefined,
       updatedAt: Date.now(),
     });
   },

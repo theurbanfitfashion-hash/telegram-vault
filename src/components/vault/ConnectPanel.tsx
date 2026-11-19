@@ -82,6 +82,7 @@ export function ConnectPanel({
   onBack?: () => void;
 }) {
   const connectBot = useAction(api.telegram.connectBot);
+  const beginChatConnection = useAction(api.telegram.beginChatConnection);
   const detectChat = useAction(api.telegram.detectChat);
   const { signOut } = useAuth();
   const navigate = useNavigate();
@@ -89,6 +90,8 @@ export function ConnectPanel({
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState<null | "bot" | "chat">(null);
   const [error, setError] = useState<string | null>(null);
+  const [chatChallenge, setChatChallenge] = useState<string | null>(null);
+  const [chatLink, setChatLink] = useState<string | null>(null);
 
   const hasBot = status.hasToken && !!status.botUsername;
   const done = status.hasToken && status.chatConnected;
@@ -119,12 +122,29 @@ export function ConnectPanel({
     }
   }
 
-  async function findChat() {
+  async function prepareChatConnection() {
     if (busy) return;
     setBusy("chat");
     setError(null);
     try {
-      await detectChat({});
+      const pairing = await beginChatConnection({});
+      setChatChallenge(pairing.challenge);
+      setChatLink(pairing.deepLink);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function findChat() {
+    if (busy || !chatChallenge) return;
+    setBusy("chat");
+    setError(null);
+    try {
+      await detectChat({ challenge: chatChallenge });
+      setChatChallenge(null);
+      setChatLink(null);
       onConnected();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -252,42 +272,45 @@ export function ConnectPanel({
               ) : (
                 <div className="-mt-1 space-y-3">
                   <p className="text-sm leading-6 text-muted-foreground">
-                    The bot owner must open this bot in Telegram and press{" "}
-                    <span className="font-medium text-foreground">Start</span> once.
-                    After that, every account using this bot can use the same storage
-                    destination without opening Telegram again.
+                    Generate a private, one-time pairing link. Open that exact link
+                    in Telegram and press <span className="font-medium text-foreground">Start</span>.
+                    Only the chat that receives your unique confirmation can be connected.
+                    The link expires after 10 minutes.
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    <Button
-                      asChild
-                      variant="outline"
-                      size="sm"
-                      disabled={!hasBot}
-                    >
-                      <a
-                        href={
-                          status.botUsername
-                            ? `https://t.me/${status.botUsername}`
-                            : "https://t.me"
-                        }
-                        target="_blank"
-                        rel="noopener noreferrer"
+                    {chatLink ? (
+                      <Button asChild variant="outline" size="sm">
+                        <a href={chatLink} target="_blank" rel="noopener noreferrer">
+                          <Send className="mr-2 size-4" />
+                          Open secure bot link
+                        </a>
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={prepareChatConnection}
+                        disabled={!hasBot || busy !== null}
                       >
-                        <Send className="mr-2 size-4" />
-                        Open my bot
-                      </a>
-                    </Button>
+                        {busy === "chat" ? (
+                          <Loader2 className="mr-2 size-4 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="mr-2 size-4" />
+                        )}
+                        Generate secure link
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       onClick={findChat}
-                      disabled={!hasBot || busy !== null}
+                      disabled={!hasBot || !chatChallenge || busy !== null}
                     >
                       {busy === "chat" ? (
                         <Loader2 className="mr-2 size-4 animate-spin" />
                       ) : (
                         <ArrowRight className="mr-2 size-4" />
                       )}
-                      I pressed Start
+                      Confirm Telegram chat
                     </Button>
                   </div>
                 </div>

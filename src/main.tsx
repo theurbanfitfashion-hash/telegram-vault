@@ -78,6 +78,10 @@ createRoot(document.getElementById("root")!).render(
                 element={<AuthPage redirectAfterAuth="/dashboard" />}
               />
               <Route
+                path="/account"
+                element={<RequireAuth><AuthPage redirectAfterAuth="/dashboard" /></RequireAuth>}
+              />
+              <Route
                 path="/dashboard"
                 element={
                   <RequireAuth>
