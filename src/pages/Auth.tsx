@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/input-otp";
 import { useAuth } from "@/hooks/use-auth";
 import logo from "@/assets/logo.svg";
+import { GuestVaultLink } from "@/components/GuestVaultLink";
 import { ArrowRight, Loader2, LogOut, Mail, Bot } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
@@ -147,6 +148,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-3 pb-6">
+                {user && <GuestVaultLink />}
                 <Button className="w-full" onClick={() => navigate(redirect, { replace: true })}>
                   Continue to the vault <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
