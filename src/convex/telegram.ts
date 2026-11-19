@@ -277,12 +277,45 @@ export const connectBot = action({
     if (!me.username) {
       throw new ConvexError("That bot has no username yet.");
     }
+    const nextBotId = String(me.id);
+    const currentConfig = await ctx.runQuery(internal.vault.getTelegramConfigDoc, { userId });
+    if (currentConfig?.botId && currentConfig.botId !== nextBotId) {
+      throw new ConvexError("To switch to a different bot and start with an empty vault, use Reset bot token in the sidebar.");
+    }
     await ctx.runMutation(internal.vault.saveTelegramConfig, {
+      userId,
+      botId: nextBotId,
+      botToken: token,
+      botUsername: me.username,
+      resetChat: false,
+    });
+    return { botUsername: me.username };
+  },
+});
+
+/** Verifies a replacement token, then starts a safe, batched fresh-vault reset. */
+export const replaceBotToken = action({
+  args: { botToken: v.string() },
+  handler: async (ctx, { botToken }) => {
+    const userId = await requireUser(ctx);
+    const token = botToken.trim();
+    if (!token || !/^\\d{5,}:[A-Za-z0-9_-]{10,}$/.test(token)) {
+      throw new ConvexError("That doesn't look like a Telegram bot token.");
+    }
+    let me: BotInfo;
+    try {
+      me = await telegram<BotInfo>("getMe", token, { json: {} });
+    } catch (error) {
+      throw new ConvexError(
+        `Telegram rejected that token. ${error instanceof Error ? error.message : "Check it in @BotFather."}`,
+      );
+    }
+    if (!me.username) throw new ConvexError("That bot has no username yet.");
+    await ctx.runMutation(internal.vault.beginBotReset, {
       userId,
       botId: String(me.id),
       botToken: token,
       botUsername: me.username,
-      resetChat: false,
     });
     return { botUsername: me.username };
   },
