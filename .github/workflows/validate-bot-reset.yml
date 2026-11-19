@@ -1,0 +1,32 @@
+name: Validate safe bot token reset
+
+on:
+  pull_request:
+    paths:
+      - "src/convex/**"
+      - "src/pages/Dashboard.tsx"
+      - "scripts/security-regression-check.mjs"
+      - ".github/workflows/validate-bot-reset.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/convex/**"
+      - "src/pages/Dashboard.tsx"
+      - "scripts/security-regression-check.mjs"
+      - ".github/workflows/validate-bot-reset.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-security-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:security
