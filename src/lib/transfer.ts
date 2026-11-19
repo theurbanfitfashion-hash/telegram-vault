@@ -268,63 +268,63 @@ export function useTransfer() {
     file: Pick<Doc<"files">, "_id" | "name" | "mimeType" | "chunkCount" | "size">,
     onProgress: (done: number, total: number) => void,
   ): Promise<void> {
-    const token = await createDownloadToken({ fileId: file._id });
-    const site = transferWorkerUrl || convexSiteUrl();
-    if (!site) throw new Error("This deployment has no download endpoint.");
-    const downloadUrl = `${site}/file/${token}?download=1`;
-    const partUrl = (index: number) => `${site}/file/${token}/${index}`;
-
-    // Stream to a user-selected file where supported. Report real byte progress.
+    // Open the save picker before the first await so browser user activation
+    // is still valid, especially on Chrome for Android.
     const picker = (window as unknown as SaveFilePicker).showSaveFilePicker;
+    let handle: Awaited<ReturnType<NonNullable<SaveFilePicker["showSaveFilePicker"]>>> | null = null;
     if (typeof picker === "function") {
-      let handle: Awaited<ReturnType<NonNullable<SaveFilePicker["showSaveFilePicker"]>>> | null = null;
       try {
         handle = await picker({ suggestedName: file.name });
       } catch (error) {
         if ((error as { name?: string })?.name === "AbortError") throw error;
         // Browser refused the picker; use its native download manager instead.
       }
-
-      if (handle) {
-        const writable = await handle.createWritable();
-        let loaded = 0;
-        onProgress(0, file.size);
-        try {
-          for (let index = 0; index < file.chunkCount; index++) {
-            const response = await fetch(partUrl(index));
-            if (!response.ok || !response.body) {
-              throw new Error(await readErrorMessage(response));
-            }
-            const reader = response.body.getReader();
-            for (;;) {
-              const { value, done } = await reader.read();
-              if (done) break;
-              await writable.write(value);
-              loaded += value.byteLength;
-              onProgress(loaded, file.size);
-            }
-          }
-          await writable.close();
-          onProgress(file.size, file.size);
-          return;
-        } catch (error) {
-          await writable.abort?.().catch(() => {});
-          throw error;
-        }
-      }
     }
 
-    // A single whole-file Worker response is capped by Cloudflare Free's
-    // 50 external subrequests. Modern Chromium on Android supports the save
-    // picker above, which streams each part in its own Worker request.
-    if (transferWorkerUrl && file.chunkCount > 24) {
+    // Cloudflare Free whole-file fallback supports at most 24 parts per
+    // request. Larger files need the browser's streamed Save File picker.
+    if (!handle && transferWorkerUrl && file.chunkCount > 24) {
       throw new Error(
         "This browser cannot save this large file directly to disk. Update to Chrome 132 or newer on Android, or use desktop Chrome/Edge, then try again.",
       );
     }
 
-    // Mobile browsers without the save picker can still use the native
-    // download manager for files that fit within one Free Worker invocation.
+    const token = await createDownloadToken({ fileId: file._id });
+    const site = transferWorkerUrl || convexSiteUrl();
+    if (!site) throw new Error("This deployment has no download endpoint.");
+    const downloadUrl = `${site}/file/${token}?download=1`;
+    const partUrl = (index: number) => `${site}/file/${token}/${index}`;
+
+    // Stream each Telegram part directly into the user-selected file.
+    if (handle) {
+      const writable = await handle.createWritable();
+      let loaded = 0;
+      onProgress(0, file.size);
+      try {
+        for (let index = 0; index < file.chunkCount; index++) {
+          const response = await fetch(partUrl(index));
+          if (!response.ok || !response.body) {
+            throw new Error(await readErrorMessage(response));
+          }
+          const reader = response.body.getReader();
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            await writable.write(value);
+            loaded += value.byteLength;
+            onProgress(loaded, file.size);
+          }
+        }
+        await writable.close();
+        onProgress(file.size, file.size);
+        return;
+      } catch (error) {
+        await writable.abort?.().catch(() => {});
+        throw error;
+      }
+    }
+
+    // Native browser download manager handles the small-file fallback.
     const anchor = document.createElement("a");
     anchor.href = downloadUrl;
     anchor.download = file.name;
