@@ -1,0 +1,80 @@
+name: Staging integration environment (isolated)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telegram-vault-staging-integration
+  cancel-in-progress: false
+
+jobs:
+  deploy-and-smoke-test:
+    if: github.ref == 'refs/heads/security/google-guest-account-linking'
+    runs-on: ubuntu-latest
+    env:
+      CONVEX_DEPLOY_KEY: ${{ secrets.TEST_CONVEX_DEPLOY_KEY }}
+      TEST_TELEGRAM_BOT_TOKEN: ${{ secrets.TEST_TELEGRAM_BOT_TOKEN }}
+      STAGING_CONVEX_URL: https://vivid-dolphin-141.ap-southeast-2.convex.cloud
+      STAGING_CONVEX_SITE: https://vivid-dolphin-141.ap-southeast-2.convex.site
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: security/google-guest-account-linking
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Validate isolated staging credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CONVEX_DEPLOY_KEY" || { echo "::error::Missing TEST_CONVEX_DEPLOY_KEY"; exit 1; }
+          test -n "$TEST_TELEGRAM_BOT_TOKEN" || { echo "::error::Missing TEST_TELEGRAM_BOT_TOKEN"; exit 1; }
+          # Validate the test bot without printing or persisting its token.
+          curl --fail --silent --show-error \
+            "https://api.telegram.org/bot${TEST_TELEGRAM_BOT_TOKEN}/getMe" \
+            | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s);if(!r.ok||!r.result?.is_bot)process.exit(1);console.log("Test Telegram bot verified:",r.result.username)})'
+      - name: Deploy Convex functions to Telegram Vault Test only
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx convex dev --once
+          npx convex env set SITE_URL=http://localhost:5173
+          ENV_LIST="$(npx convex env list)"
+          if ! printf '%s\n' "$ENV_LIST" | grep -q 'JWT_PRIVATE_KEY' || ! printf '%s\n' "$ENV_LIST" | grep -q 'JWKS'; then
+            node --input-type=module <<'NODE'
+          import { generateKeyPairSync, createPublicKey } from "node:crypto";
+          import { spawnSync } from "node:child_process";
+          const { privateKey, publicKey } = generateKeyPairSync("rsa", {
+            modulusLength: 2048,
+            privateKeyEncoding: { type: "pkcs8", format: "pem" },
+            publicKeyEncoding: { type: "spki", format: "pem" },
+          });
+          const jwk = createPublicKey(publicKey).export({ format: "jwk" });
+          const jwks = JSON.stringify({ keys: [{ use: "sig", ...jwk }] });
+          for (const [name, value] of [
+            ["JWT_PRIVATE_KEY", privateKey.trimEnd().replace(/\n/g, " ")],
+            ["JWKS", jwks],
+          ]) {
+            const result = spawnSync("npx", ["convex", "env", "set", `${name}=${value}`], { stdio: "inherit" });
+            if (result.status !== 0) process.exit(result.status ?? 1);
+          }
+          NODE
+          fi
+      - name: Verify staging HTTP endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error "$STAGING_CONVEX_SITE/health" | grep -q 'telegram-vault-file-endpoint-ok'; then
+              echo "Staging Convex health endpoint passed."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Staging Convex health endpoint did not become ready."
+          exit 1
