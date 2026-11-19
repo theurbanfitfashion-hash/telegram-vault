@@ -101,6 +101,9 @@ const schema = defineSchema(
       botUsername: v.string(),
       chatId: v.optional(v.string()),
       chatTitle: v.optional(v.string()),
+      // One-time, short-lived proof that the person connecting controls this Telegram chat.
+      chatChallenge: v.optional(v.string()),
+      chatChallengeExpiresAt: v.optional(v.number()),
       updatedAt: v.number(),
     }).index("by_bot_id", ["botId"]),
 
