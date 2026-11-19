@@ -65,9 +65,9 @@ export default function Dashboard() {
   const { uploadFile, downloadFile, deleteFile } = useTransfer();
 
   // --- location ----------------------------------------------------------
-  const folders = useQuery(api.vault.listFolders);
   const botResetting = useQuery(api.vault.getBotResetStatus);
-  const storageUsage = useQuery(api.vault.getStorageUsage);
+  const folders = useQuery(api.vault.listFolders, botResetting === true ? "skip" : {});
+  const storageUsage = useQuery(api.vault.getStorageUsage, botResetting === true ? "skip" : {});
   const foldersReady = folders !== undefined;
   const requestedId = searchParams.get("f");
   const requestedIsValid =
