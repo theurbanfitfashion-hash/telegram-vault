@@ -248,9 +248,37 @@ const downloadWhole = httpAction(async (ctx, request) => {
   try {
     const url = new URL(request.url);
     const { pathname } = url;
-    const [, route, token] = pathname.split("/");
+    const [, route, token, rawIndex] = pathname.split("/");
     if (route !== "file" || !token) return textResponse(404, "Not found");
-  
+
+    // The shared /file/ prefix serves both the assembled file and individual
+    // chunks. Keep this fallback working when the Cloudflare Worker is unset.
+    if (rawIndex !== undefined) {
+      if (!/^\\d+$/.test(rawIndex)) return textResponse(400, "Bad part index");
+      const index = Number(rawIndex);
+      if (!Number.isSafeInteger(index)) return textResponse(400, "Bad part index");
+      const part = await ctx.runQuery(internal.vault.resolveDownload, { token, index });
+      if (!part) return textResponse(410, "This download link has expired.");
+      let upstream: Uint8Array;
+      try {
+        upstream = await openPart(part.botToken, part.telegramFileId);
+      } catch {
+        return textResponse(502, "Telegram could not serve this file.");
+      }
+      return new Response(
+        upstream.buffer.slice(upstream.byteOffset, upstream.byteOffset + upstream.byteLength) as ArrayBuffer,
+        {
+          status: 200,
+          headers: {
+            ...CORS_HEADERS,
+            "Content-Type": "application/octet-stream",
+            "Content-Disposition": `attachment; filename="part-${index}"`,
+            "Cache-Control": "private, max-age=0",
+          },
+        },
+      );
+    }
+
     const file = await ctx.runQuery(internal.vault.resolveWholeFile, { token });
     if (!file) return textResponse(410, "This download link has expired.");
   
@@ -329,42 +357,6 @@ const downloadWhole = httpAction(async (ctx, request) => {
  * loop in the app, which writes part by part so large saves stream straight
  * to disk instead of assembling in memory.
  */
-const downloadPart = httpAction(async (ctx, request) => {
-  const { pathname } = new URL(request.url);
-  const [, route, token, indexPart] = pathname.split("/");
-  if (route !== "file" || !token) return textResponse(404, "Not found");
-
-  const index = Number(indexPart);
-  if (!Number.isInteger(index) || index < 0) {
-    return textResponse(400, "Bad part index");
-  }
-
-  const part = await ctx.runQuery(internal.vault.resolveDownload, {
-    token,
-    index,
-  });
-  if (!part) {
-    return textResponse(410, "This download link has expired.");
-  }
-
-  let upstream: Uint8Array;
-  try {
-    upstream = await openPart(part.botToken, part.telegramFileId);
-  } catch {
-    return textResponse(502, "Telegram could not serve this file.");
-  }
-
-  return new Response(upstream.buffer.slice(upstream.byteOffset, upstream.byteOffset + upstream.byteLength) as ArrayBuffer, {
-    status: 200,
-    headers: {
-      ...CORS_HEADERS,
-      "Content-Type": "application/octet-stream",
-      "Content-Disposition": `attachment; filename="part-${index}"`,
-      "Cache-Control": "private, max-age=0",
-    },
-  });
-});
-
 const transferWorkerAuthorized = (request: Request): boolean => {
   const expected = process.env.TRANSFER_WORKER_SECRET;
   const provided = request.headers.get("x-transfer-worker-secret");
