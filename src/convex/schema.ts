@@ -92,7 +92,9 @@ const schema = defineSchema(
       chatId: v.optional(v.string()),
       chatTitle: v.optional(v.string()),
       updatedAt: v.number(),
-    }).index("by_user", ["userId"]),
+    })
+      .index("by_user", ["userId"])
+      .index("by_bot_id", ["botId"]),
 
     // One canonical Telegram storage destination per bot, shared by all app accounts.
     // The bot token is a secret and is never used as a database key.
