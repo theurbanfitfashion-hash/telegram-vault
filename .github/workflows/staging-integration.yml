@@ -17,7 +17,6 @@ jobs:
     env:
       CONVEX_DEPLOY_KEY: ${{ secrets.TEST_CONVEX_DEPLOY_KEY }}
       TEST_TELEGRAM_BOT_TOKEN: ${{ secrets.TEST_TELEGRAM_BOT_TOKEN }}
-      STAGING_CONVEX_URL: https://vivid-dolphin-141.ap-southeast-2.convex.cloud
       STAGING_CONVEX_SITE: https://vivid-dolphin-141.ap-southeast-2.convex.site
     steps:
       - uses: actions/checkout@v4
@@ -45,25 +44,8 @@ jobs:
           npx convex dev --once
           npx convex env set SITE_URL=http://localhost:5173
           ENV_LIST="$(npx convex env list)"
-          if ! printf '%s\n' "$ENV_LIST" | grep -q 'JWT_PRIVATE_KEY' || ! printf '%s\n' "$ENV_LIST" | grep -q 'JWKS'; then
-            node --input-type=module <<'NODE'
-          import { generateKeyPairSync, createPublicKey } from "node:crypto";
-          import { spawnSync } from "node:child_process";
-          const { privateKey, publicKey } = generateKeyPairSync("rsa", {
-            modulusLength: 2048,
-            privateKeyEncoding: { type: "pkcs8", format: "pem" },
-            publicKeyEncoding: { type: "spki", format: "pem" },
-          });
-          const jwk = createPublicKey(publicKey).export({ format: "jwk" });
-          const jwks = JSON.stringify({ keys: [{ use: "sig", ...jwk }] });
-          for (const [name, value] of [
-            ["JWT_PRIVATE_KEY", privateKey.trimEnd().replace(/\n/g, " ")],
-            ["JWKS", jwks],
-          ]) {
-            const result = spawnSync("npx", ["convex", "env", "set", `${name}=${value}`], { stdio: "inherit" });
-            if (result.status !== 0) process.exit(result.status ?? 1);
-          }
-          NODE
+          if ! printf '%s\\n' "$ENV_LIST" | grep -q 'JWT_PRIVATE_KEY' || ! printf '%s\\n' "$ENV_LIST" | grep -q 'JWKS'; then
+            npx @convex-dev/auth --skip-git-check --web-server-url http://localhost:5173
           fi
       - name: Verify staging HTTP endpoint
         shell: bash
