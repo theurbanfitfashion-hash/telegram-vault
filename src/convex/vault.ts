@@ -240,6 +240,11 @@ export const linkGuestVault = mutation({
       .withIndex("by_user", (q) => q.eq("userId", authUserId)).unique();
     const destinationConfig = await ctx.db.query("telegramConfig")
       .withIndex("by_user", (q) => q.eq("userId", authUserId)).unique();
+    const botConfigs = await ctx.db.query("telegramConfig")
+      .withIndex("by_bot_id", (q) => q.eq("botId", guestVault.botId)).take(3);
+    if (botConfigs.some((config) => config.userId !== guestVault.userId && config.userId !== authUserId)) {
+      throw new ConvexError("This bot is configured in another account too. No account will be selected automatically; resolve the existing connection first.");
+    }
 
     if (destinationFiles.length || destinationFolders.length ||
         destinationUploadTokens.length || destinationDownloadTokens.length ||
