@@ -299,7 +299,7 @@ export const replaceBotToken = action({
   handler: async (ctx, { botToken }) => {
     const userId = await requireUser(ctx);
     const token = botToken.trim();
-    if (!token || !/^\\d{5,}:[A-Za-z0-9_-]{10,}$/.test(token)) {
+    if (!token || !/^\d{5,}:[A-Za-z0-9_-]{10,}$/.test(token)) {
       throw new ConvexError("That doesn't look like a Telegram bot token.");
     }
     let me: BotInfo;
