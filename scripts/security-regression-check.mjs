@@ -22,7 +22,7 @@ test("Telegram chat replacement requires the current unexpired one-time challeng
   const end = source.indexOf("/** Records one part", start);
   const body = source.slice(start, end);
   assert.match(body, /existing\.chatChallenge !== challenge/);
-  assert.match(body, /existing\.chatChallengeExpiresAt < Date\.now\(\)/);
+  assert.match(body, /existing\.chatChallengeExpiresAt <= Date\.now\(\)/);
   assert.match(body, /chatVerified: true/);
   assert.match(body, /chatChallenge: undefined/);
 });
