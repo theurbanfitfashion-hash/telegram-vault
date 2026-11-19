@@ -670,6 +670,13 @@ export const createChunkTransferToken = mutation({
       return { token: "", alreadyUploaded: true };
     }
     const now = Date.now();
+    // Expired one-part capabilities should not accumulate when an upload is
+    // abandoned before Telegram confirms the part.
+    const stale = await ctx.db.query("uploadTokens")
+      .withIndex("by_user_expiry", (q) => q.eq("userId", userId).lt("expiresAt", now))
+      .take(50);
+    for (const record of stale) await ctx.db.delete(record._id);
+
     const existing = await ctx.db.query("uploadTokens")
       .withIndex("by_file_index", (q) => q.eq("fileId", fileId).eq("index", index))
       .take(5);
