@@ -832,7 +832,7 @@ export const saveChat = internalMutation({
       !existing.chatChallenge ||
       existing.chatChallenge !== challenge ||
       !existing.chatChallengeExpiresAt ||
-      existing.chatChallengeExpiresAt < Date.now()
+      existing.chatChallengeExpiresAt <= Date.now()
     ) {
       throw new ConvexError("This Telegram pairing link is invalid or expired. Generate a new one.");
     }
