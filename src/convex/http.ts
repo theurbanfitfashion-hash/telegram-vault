@@ -254,7 +254,7 @@ const downloadWhole = httpAction(async (ctx, request) => {
     // The shared /file/ prefix serves both the assembled file and individual
     // chunks. Keep this fallback working when the Cloudflare Worker is unset.
     if (rawIndex !== undefined) {
-      if (!/^\\d+$/.test(rawIndex)) return textResponse(400, "Bad part index");
+      if (!/^\d+$/.test(rawIndex)) return textResponse(400, "Bad part index");
       const index = Number(rawIndex);
       if (!Number.isSafeInteger(index)) return textResponse(400, "Bad part index");
       const part = await ctx.runQuery(internal.vault.resolveDownload, { token, index });
