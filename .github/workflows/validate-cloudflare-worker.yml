@@ -1,0 +1,30 @@
+name: Validate Cloudflare transfer Worker
+
+on:
+  pull_request:
+    paths:
+      - "workers/telegram-transfer/**"
+      - ".github/workflows/validate-cloudflare-worker.yml"
+  push:
+    branches: [main]
+    paths:
+      - "workers/telegram-transfer/**"
+      - ".github/workflows/validate-cloudflare-worker.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate Worker bundle without deploying
+        run: npx --yes wrangler@4 deploy --dry-run --config workers/telegram-transfer/wrangler.toml
