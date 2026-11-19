@@ -462,7 +462,7 @@ export const resolveWholeFile = internalQuery({
           .unique()
       : null;
     const botToken = bot?.botToken ?? config.botToken;
-    const chatId = bot?.chatId ?? config.chatId;
+    const chatId = bot?.chatVerified === true ? bot.chatId : undefined;
     if (!botToken || !chatId) return null;
 
     return {
@@ -503,7 +503,7 @@ export const resolveDownload = internalQuery({
           .unique()
       : null;
     const botToken = bot?.botToken ?? config.botToken;
-    const chatId = bot?.chatId ?? config.chatId;
+    const chatId = bot?.chatVerified === true ? bot.chatId : undefined;
     if (!botToken || !chatId) return null;
 
     return {
@@ -619,21 +619,17 @@ export const saveTelegramConfig = internalMutation({
       .query("telegramBots")
       .withIndex("by_bot_id", (q) => q.eq("botId", botId))
       .unique();
-    const legacyChatId = !botChanged && !resetChat ? existing?.chatId : undefined;
-    const legacyChatTitle = !botChanged && !resetChat ? existing?.chatTitle : undefined;
     if (shared) {
       await ctx.db.patch(shared._id, {
         botToken,
         botUsername,
         updatedAt: Date.now(),
-        ...(shared.chatId ? {} : legacyChatId ? { chatId: legacyChatId, chatTitle: legacyChatTitle } : {}),
       });
     } else {
       await ctx.db.insert("telegramBots", {
         botId,
         botToken,
         botUsername,
-        ...(legacyChatId ? { chatId: legacyChatId, chatTitle: legacyChatTitle } : {}),
         updatedAt: Date.now(),
       });
     }
@@ -653,6 +649,9 @@ export const saveChatChallenge = internalMutation({
       .unique();
     if (!existing) throw new Error("Connect the bot before pairing its Telegram chat.");
     await ctx.db.patch(existing._id, {
+      chatId: undefined,
+      chatTitle: undefined,
+      chatVerified: false,
       chatChallenge: challenge,
       chatChallengeExpiresAt: expiresAt,
       updatedAt: Date.now(),
@@ -684,6 +683,7 @@ export const saveChat = internalMutation({
     await ctx.db.patch(existing._id, {
       chatId,
       chatTitle,
+      chatVerified: true,
       chatChallenge: undefined,
       chatChallengeExpiresAt: undefined,
       updatedAt: Date.now(),
