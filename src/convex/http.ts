@@ -248,9 +248,37 @@ const downloadWhole = httpAction(async (ctx, request) => {
   try {
     const url = new URL(request.url);
     const { pathname } = url;
-    const [, route, token] = pathname.split("/");
+    const [, route, token, rawIndex] = pathname.split("/");
     if (route !== "file" || !token) return textResponse(404, "Not found");
-  
+
+    // The shared /file/ prefix serves both the assembled file and individual
+    // chunks. Keep this fallback working when the Cloudflare Worker is unset.
+    if (rawIndex !== undefined) {
+      if (!/^\d+$/.test(rawIndex)) return textResponse(400, "Bad part index");
+      const index = Number(rawIndex);
+      if (!Number.isSafeInteger(index)) return textResponse(400, "Bad part index");
+      const part = await ctx.runQuery(internal.vault.resolveDownload, { token, index });
+      if (!part) return textResponse(410, "This download link has expired.");
+      let upstream: Uint8Array;
+      try {
+        upstream = await openPart(part.botToken, part.telegramFileId);
+      } catch {
+        return textResponse(502, "Telegram could not serve this file.");
+      }
+      return new Response(
+        upstream.buffer.slice(upstream.byteOffset, upstream.byteOffset + upstream.byteLength) as ArrayBuffer,
+        {
+          status: 200,
+          headers: {
+            ...CORS_HEADERS,
+            "Content-Type": "application/octet-stream",
+            "Content-Disposition": `attachment; filename="part-${index}"`,
+            "Cache-Control": "private, max-age=0",
+          },
+        },
+      );
+    }
+
     const file = await ctx.runQuery(internal.vault.resolveWholeFile, { token });
     if (!file) return textResponse(410, "This download link has expired.");
   
@@ -329,40 +357,90 @@ const downloadWhole = httpAction(async (ctx, request) => {
  * loop in the app, which writes part by part so large saves stream straight
  * to disk instead of assembling in memory.
  */
-const downloadPart = httpAction(async (ctx, request) => {
-  const { pathname } = new URL(request.url);
-  const [, route, token, indexPart] = pathname.split("/");
-  if (route !== "file" || !token) return textResponse(404, "Not found");
-
-  const index = Number(indexPart);
-  if (!Number.isInteger(index) || index < 0) {
-    return textResponse(400, "Bad part index");
+const transferWorkerAuthorized = (request: Request): boolean => {
+  const expected = process.env.TRANSFER_WORKER_SECRET;
+  const provided = request.headers.get("x-transfer-worker-secret");
+  if (!expected || !provided || expected.length !== provided.length) return false;
+  let mismatch = 0;
+  for (let index = 0; index < expected.length; index++) {
+    mismatch |= expected.charCodeAt(index) ^ provided.charCodeAt(index);
   }
+  return mismatch === 0;
+};
 
-  const part = await ctx.runQuery(internal.vault.resolveDownload, {
-    token,
-    index,
+function transferJson(status: number, value: unknown): Response {
+  return Response.json(value, {
+    status,
+    headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
   });
-  if (!part) {
-    return textResponse(410, "This download link has expired.");
-  }
+}
 
-  let upstream: Uint8Array;
+/**
+ * These endpoints are server-to-server only. The Worker secret is never sent
+ * to the browser; upload/download capabilities are separately scoped in DB.
+ */
+const authorizeWorkerUpload = httpAction(async (ctx, request) => {
+  if (request.method !== "POST" || !transferWorkerAuthorized(request)) {
+    return transferJson(401, { error: "Unauthorized" });
+  }
   try {
-    upstream = await openPart(part.botToken, part.telegramFileId);
+    const body = await request.json() as { token?: unknown };
+    if (typeof body.token !== "string" || body.token.length !== 48) {
+      return transferJson(400, { error: "Invalid upload authorization" });
+    }
+    const transfer = await ctx.runQuery(internal.vault.resolveUploadTransfer, {
+      token: body.token,
+    });
+    if (!transfer) return transferJson(410, { error: "Upload authorization expired or invalid" });
+    return transferJson(200, transfer);
   } catch {
-    return textResponse(502, "Telegram could not serve this file.");
+    return transferJson(400, { error: "Invalid transfer request" });
   }
+});
 
-  return new Response(upstream.buffer.slice(upstream.byteOffset, upstream.byteOffset + upstream.byteLength) as ArrayBuffer, {
-    status: 200,
-    headers: {
-      ...CORS_HEADERS,
-      "Content-Type": "application/octet-stream",
-      "Content-Disposition": `attachment; filename="part-${index}"`,
-      "Cache-Control": "private, max-age=0",
-    },
-  });
+const completeWorkerUpload = httpAction(async (ctx, request) => {
+  if (request.method !== "POST" || !transferWorkerAuthorized(request)) {
+    return transferJson(401, { error: "Unauthorized" });
+  }
+  try {
+    const body = await request.json() as {
+      token?: unknown; telegramFileId?: unknown; messageId?: unknown;
+    };
+    if (
+      typeof body.token !== "string" || body.token.length !== 48 ||
+      typeof body.telegramFileId !== "string" || body.telegramFileId.length > 512 ||
+      typeof body.messageId !== "number" || !Number.isSafeInteger(body.messageId)
+    ) {
+      return transferJson(400, { error: "Invalid upload completion" });
+    }
+    await ctx.runMutation(internal.vault.recordTransferredPart, {
+      token: body.token,
+      telegramFileId: body.telegramFileId,
+      messageId: body.messageId,
+    });
+    return transferJson(200, { ok: true });
+  } catch {
+    return transferJson(409, { error: "Could not record the uploaded part" });
+  }
+});
+
+const resolveWorkerDownload = httpAction(async (ctx, request) => {
+  if (request.method !== "POST" || !transferWorkerAuthorized(request)) {
+    return transferJson(401, { error: "Unauthorized" });
+  }
+  try {
+    const body = await request.json() as { token?: unknown };
+    if (typeof body.token !== "string" || !/^[a-f0-9]{48}$/.test(body.token)) {
+      return transferJson(400, { error: "Invalid download authorization" });
+    }
+    const file = await ctx.runQuery(internal.vault.resolveWholeFile, {
+      token: body.token,
+    });
+    if (!file) return transferJson(410, { error: "This download link has expired." });
+    return transferJson(200, file);
+  } catch {
+    return transferJson(400, { error: "Invalid transfer request" });
+  }
 });
 
 const healthCheck = httpAction(async () => {
@@ -380,6 +458,9 @@ const corsPreflight = httpAction(async () => {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 });
 
+http.route({ path: "/transfer/upload/authorize", method: "POST", handler: authorizeWorkerUpload });
+http.route({ path: "/transfer/upload/complete", method: "POST", handler: completeWorkerUpload });
+http.route({ path: "/transfer/download/resolve", method: "POST", handler: resolveWorkerDownload });
 http.route({ path: "/health", method: "GET", handler: healthCheck });
 http.route({ path: "/health", method: "OPTIONS", handler: corsPreflight });
 

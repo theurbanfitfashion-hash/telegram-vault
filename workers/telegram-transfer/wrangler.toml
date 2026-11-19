@@ -1,0 +1,10 @@
+name = "telegram-vault-transfer"
+main = "src/index.ts"
+compatibility_date = "2026-11-19"
+workers_dev = true
+
+[observability]
+enabled = true
+
+[observability.traces]
+enabled = true
