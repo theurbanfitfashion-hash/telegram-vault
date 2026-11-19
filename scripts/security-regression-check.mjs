@@ -114,3 +114,15 @@ test("Telegram connections no longer fall back to a shared deployment bot token"
   const source = await read("../src/convex/telegram.ts");
   assert.doesNotMatch(source, /envToken\(\)|TELEGRAM_BOT_TOKEN/);
 });
+
+test("linked guest sessions cannot keep accessing the vault after linking", async () => {
+  const vault = await read("../src/convex/vault.ts");
+  assert.match(vault, /This guest vault is linked to a Google\/email account/);
+  assert.match(vault, /withIndex\("by_vault_user"/);
+});
+
+test("dashboard surfaces bot ownership conflicts and provides a path to account reset", async () => {
+  const dashboard = await read("../src/pages/Dashboard.tsx");
+  assert.match(dashboard, /setStatusError\(errorMessage\(error\)\)/);
+  assert.match(dashboard, /navigate\("\/account"\)/);
+});
