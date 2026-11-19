@@ -365,6 +365,92 @@ const downloadPart = httpAction(async (ctx, request) => {
   });
 });
 
+const transferWorkerAuthorized = (request: Request): boolean => {
+  const expected = process.env.TRANSFER_WORKER_SECRET;
+  const provided = request.headers.get("x-transfer-worker-secret");
+  if (!expected || !provided || expected.length !== provided.length) return false;
+  let mismatch = 0;
+  for (let index = 0; index < expected.length; index++) {
+    mismatch |= expected.charCodeAt(index) ^ provided.charCodeAt(index);
+  }
+  return mismatch === 0;
+};
+
+function transferJson(status: number, value: unknown): Response {
+  return Response.json(value, {
+    status,
+    headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
+  });
+}
+
+/**
+ * These endpoints are server-to-server only. The Worker secret is never sent
+ * to the browser; upload/download capabilities are separately scoped in DB.
+ */
+const authorizeWorkerUpload = httpAction(async (ctx, request) => {
+  if (request.method !== "POST" || !transferWorkerAuthorized(request)) {
+    return transferJson(401, { error: "Unauthorized" });
+  }
+  try {
+    const body = await request.json() as { token?: unknown };
+    if (typeof body.token !== "string" || body.token.length !== 48) {
+      return transferJson(400, { error: "Invalid upload authorization" });
+    }
+    const transfer = await ctx.runQuery(internal.vault.resolveUploadTransfer, {
+      token: body.token,
+    });
+    if (!transfer) return transferJson(410, { error: "Upload authorization expired or invalid" });
+    return transferJson(200, transfer);
+  } catch {
+    return transferJson(400, { error: "Invalid transfer request" });
+  }
+});
+
+const completeWorkerUpload = httpAction(async (ctx, request) => {
+  if (request.method !== "POST" || !transferWorkerAuthorized(request)) {
+    return transferJson(401, { error: "Unauthorized" });
+  }
+  try {
+    const body = await request.json() as {
+      token?: unknown; telegramFileId?: unknown; messageId?: unknown;
+    };
+    if (
+      typeof body.token !== "string" || body.token.length !== 48 ||
+      typeof body.telegramFileId !== "string" || body.telegramFileId.length > 512 ||
+      typeof body.messageId !== "number" || !Number.isSafeInteger(body.messageId)
+    ) {
+      return transferJson(400, { error: "Invalid upload completion" });
+    }
+    await ctx.runMutation(internal.vault.recordTransferredPart, {
+      token: body.token,
+      telegramFileId: body.telegramFileId,
+      messageId: body.messageId,
+    });
+    return transferJson(200, { ok: true });
+  } catch {
+    return transferJson(409, { error: "Could not record the uploaded part" });
+  }
+});
+
+const resolveWorkerDownload = httpAction(async (ctx, request) => {
+  if (request.method !== "POST" || !transferWorkerAuthorized(request)) {
+    return transferJson(401, { error: "Unauthorized" });
+  }
+  try {
+    const body = await request.json() as { token?: unknown };
+    if (typeof body.token !== "string" || !/^[a-f0-9]{48}$/.test(body.token)) {
+      return transferJson(400, { error: "Invalid download authorization" });
+    }
+    const file = await ctx.runQuery(internal.vault.resolveWholeFile, {
+      token: body.token,
+    });
+    if (!file) return transferJson(410, { error: "This download link has expired." });
+    return transferJson(200, file);
+  } catch {
+    return transferJson(400, { error: "Invalid transfer request" });
+  }
+});
+
 const healthCheck = httpAction(async () => {
   return new Response("telegram-vault-file-endpoint-ok", {
     status: 200,
@@ -380,6 +466,9 @@ const corsPreflight = httpAction(async () => {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 });
 
+http.route({ path: "/transfer/upload/authorize", method: "POST", handler: authorizeWorkerUpload });
+http.route({ path: "/transfer/upload/complete", method: "POST", handler: completeWorkerUpload });
+http.route({ path: "/transfer/download/resolve", method: "POST", handler: resolveWorkerDownload });
 http.route({ path: "/health", method: "GET", handler: healthCheck });
 http.route({ path: "/health", method: "OPTIONS", handler: corsPreflight });
 
