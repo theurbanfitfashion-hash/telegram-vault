@@ -42,6 +42,7 @@ interface TelegramFileHandle {
 interface TelegramMessage {
   message_id: number;
   chat: TelegramChat;
+  text?: string;
   document?: TelegramFileHandle;
   audio?: TelegramFileHandle;
   video?: TelegramFileHandle;
@@ -287,36 +288,58 @@ export const connectBot = action({
   },
 });
 
-export const detectChat = action({
+export const beginChatConnection = action({
   args: {},
   handler: async (ctx) => {
     const userId = await requireUser(ctx);
     const bot = await resolveBot(ctx, userId);
-    if (!bot) throw new ConvexError("Connect your bot token first.");
+    if (!bot?.username) throw new ConvexError("Connect your bot token first.");
 
-    // A webhook would make getUpdates fail with a conflict.
-    await telegram("deleteWebhook", bot.token, { json: {} }).catch(() => {});
+    // Telegram deep-link start parameters support URL-safe alphanumeric characters.
+    const challenge = Array.from(
+      crypto.getRandomValues(new Uint8Array(24)),
+      (byte) => byte.toString(16).padStart(2, "0"),
+    ).join("");
+    await ctx.runMutation(internal.vault.saveChatChallenge, {
+      botId: bot.botId,
+      challenge,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    });
+    return {
+      challenge,
+      deepLink: `https://t.me/${bot.username}?start=${challenge}`,
+    };
+  },
+});
+
+export const detectChat = action({
+  args: { challenge: v.string() },
+  handler: async (ctx, { challenge }) => {
+    const userId = await requireUser(ctx);
+    const bot = await resolveBot(ctx, userId);
+    if (!bot) throw new ConvexError("Connect your bot token first.");
+    if (!/^[a-f0-9]{48}$/.test(challenge)) {
+      throw new ConvexError("Generate a new secure Telegram pairing link.");
+    }
+
+    // Do not delete a webhook or accept arbitrary private messages. Only the
+    // exact one-time /start challenge generated for this signed-in session
+    // proves control of the intended Telegram chat.
     const updates = await telegram<TelegramUpdate[]>("getUpdates", bot.token, {
       json: { timeout: 0, allowed_updates: ["message"] },
     });
-
-    const fromUser = updates.filter(
-      (update) => update.message?.chat?.type === "private",
+    const matched = updates.find(
+      (update) =>
+        update.message?.chat?.type === "private" &&
+        update.message.text === `/start ${challenge}`,
     );
-    const latest = fromUser[fromUser.length - 1];
-    if (!latest?.message) {
+    if (!matched?.message) {
       throw new ConvexError(
-        "No Start message yet — open your bot in Telegram, press Start, then try again.",
+        "We haven't received your secure Start confirmation yet. Open the generated link, press Start, then try again.",
       );
     }
 
-    // Confirm everything we read so the backlog doesn't linger.
-    const offset = Math.max(...updates.map((update) => update.update_id)) + 1;
-    await telegram("getUpdates", bot.token, {
-      json: { offset, allowed_updates: ["message"] },
-    }).catch(() => {});
-
-    const chat = latest.message.chat;
+    const chat = matched.message.chat;
     const chatTitle =
       [chat.first_name, chat.last_name].filter(Boolean).join(" ") ||
       chat.title ||
@@ -325,7 +348,14 @@ export const detectChat = action({
       botId: bot.botId,
       chatId: String(chat.id),
       chatTitle,
+      challenge,
     });
+
+    // Acknowledge updates only after the matching challenge was saved.
+    const offset = Math.max(...updates.map((update) => update.update_id)) + 1;
+    await telegram("getUpdates", bot.token, {
+      json: { offset, allowed_updates: ["message"] },
+    }).catch(() => {});
     return { chatTitle };
   },
 });
