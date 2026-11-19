@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:security": "node --test scripts/security-regression-check.mjs"
   },
   "dependencies": {
     "@auth/core": "0.41.1",
